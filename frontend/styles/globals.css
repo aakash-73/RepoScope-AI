@@ -1,0 +1,174 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+  }
+
+  body {
+    background-color: #121212;
+    color: #e5e7eb;
+    font-family: "DM Sans", sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: #1e1e1e;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #374151;
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #B6FF3B;
+  }
+}
+
+@layer components {
+  /* Glass panel */
+  .glass {
+    @apply bg-charcoal-100/70 backdrop-blur-md border border-white/5 rounded-xl;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  }
+
+  .glass-sm {
+    @apply bg-charcoal-100/80 backdrop-blur-sm border border-white/5 rounded-lg;
+  }
+
+  /* Neon Moss button */
+  .btn-moss {
+    @apply bg-moss text-charcoal-300 font-display font-semibold px-5 py-2.5 rounded-lg
+           transition-all duration-200 hover:bg-moss-dim active:scale-95;
+  }
+
+  .btn-ghost {
+    @apply bg-transparent text-slate-400 border border-white/10 font-display px-4 py-2 rounded-lg
+           hover:border-moss/50 hover:text-moss transition-all duration-200;
+  }
+
+  /* Input */
+  .input-field {
+    @apply w-full bg-charcoal-50 border border-white/10 rounded-lg px-4 py-2.5
+           text-sm text-slate-400 placeholder-slate-600 outline-none
+           focus:border-moss/60 focus:ring-1 focus:ring-moss/30 transition-all;
+  }
+
+  /* Badge */
+  .badge {
+    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-mono;
+  }
+
+  .badge-moss {
+    @apply badge bg-moss/10 text-moss border border-moss/20;
+  }
+
+  .badge-danger {
+    @apply badge bg-red-500/10 text-red-400 border border-red-500/20;
+  }
+
+  .badge-gray {
+    @apply badge bg-slate-700/50 text-slate-400 border border-white/5;
+  }
+}
+
+/* React Flow overrides */
+.react-flow__background {
+  background-color: #121212 !important;
+}
+
+.react-flow__edge-path {
+  stroke-width: 1.5;
+}
+
+/* FIX: Allow badges ("dead code", "test", "tested", "circular") to
+   overflow the node bounding box. Without this, html-to-image clips
+   them because the wrapper defaults to overflow:hidden. */
+.react-flow__node {
+  overflow: visible !important;
+}
+
+.react-flow__minimap {
+  background: #1e1e1e !important;
+  border: 1px solid rgba(255, 255, 255, 0.05) !important;
+  border-radius: 8px !important;
+}
+
+.react-flow__minimap-mask {
+  fill: rgba(182, 255, 59, 0.08) !important;
+}
+
+.react-flow__controls {
+  border: 1px solid rgba(255, 255, 255, 0.05) !important;
+  border-radius: 8px !important;
+  overflow: hidden;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4) !important;
+}
+
+.react-flow__controls-button {
+  background: #1e1e1e !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
+  fill: #9CA3AF !important;
+}
+
+.react-flow__controls-button:hover {
+  background: #2a2a2a !important;
+  fill: #B6FF3B !important;
+}
+
+/* Markdown in sidebar */
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3 {
+  color: #B6FF3B;
+  font-family: "Space Grotesk", sans-serif;
+  font-weight: 600;
+  margin-top: 1em;
+  margin-bottom: 0.4em;
+}
+
+.markdown-body p {
+  color: #9CA3AF;
+  font-size: 0.875rem;
+  line-height: 1.6;
+  margin-bottom: 0.6em;
+}
+
+.markdown-body code {
+  background: rgba(182, 255, 59, 0.08);
+  color: #B6FF3B;
+  padding: 0.1em 0.4em;
+  border-radius: 4px;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.8rem;
+}
+
+.markdown-body ul,
+.markdown-body ol {
+  color: #9CA3AF;
+  font-size: 0.875rem;
+  padding-left: 1.2em;
+  margin-bottom: 0.6em;
+}
+
+.markdown-body li {
+  margin-bottom: 0.2em;
+}
+
+.markdown-body strong {
+  color: #e5e7eb;
+}
