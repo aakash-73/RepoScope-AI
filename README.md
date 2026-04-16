@@ -104,7 +104,7 @@ The result: a **living, queryable knowledge base** for any codebase, built in mi
 - **🔗 Interactive Dependency Graph** — Visualize how every file in a repo connects through imports/exports in a zoomable, pannable React Flow canvas
 - **🤖 Per-Node AI Analysis** — Every file is analyzed by an LLM for purpose, architectural role, patterns, concerns, and a one-line summary for dependents
 - **🧠 Repo-Level Understanding** — Synthesized overview of the entire repository: tech stack, architecture, entry points, data flow, and key components
-- **💬 AI Chat (File + Repo Level)** — Ask freeform questions about any individual file or the entire repository's architecture
+- **💬 AI Chat with Hive Network Routing** — Ask freeform questions about the entire repository. The **Query Router** dynamically maps your query to distinct conceptual "Hives" (e.g. *AI Services*, *Database*) precisely fetching the right context.
 - **🔍 Proactive Insights** — AI surfaces 3–5 actionable insights (coupling hotspots, architectural concerns, notable patterns) without being asked
 
 ### Analysis & Detection
@@ -341,7 +341,7 @@ flowchart TD
     
     T --> U["💬 File-Level Chat\nUses pre-analyzed node context\n(purpose, role, patterns)\nas conversation grounding"]
     
-    T --> V["💬 Repo-Level Chat\nUses repo_analysis synthesis\n(architecture, data flow, patterns)\nas conversation grounding"]
+    T --> V["💬 Repo-Level Chat\nQuery Router connects to\nConceptual Hives & Synthesis"]
     
     T --> W["💡 Proactive Insights\nAI surfaces 3-5 actionable\nfindings automatically"]
 
@@ -455,7 +455,19 @@ The key insight is that **node-level analysis feeds repo-level intelligence**:
 
 3. **Repo-Level Synthesis** — After all nodes are analyzed, the system aggregates every node summary into a cohesive **repo_analysis** document organized by architectural layer (frontend, backend, database, devops). This becomes the grounding context for repo-level chat, so the AI can answer questions like *"how does data flow from the frontend to the database?"* with precise, file-level detail.
 
-4. **Real-Time Materialization** — The SSE stream broadcasts each completed analysis instantly. The graph transitions from a "ghosted blueprint" to a fully "materialized" architecture as each node lights up, making the analysis process visible and engaging.
+4. **Hive Network Router** — When chatting with the repo, the AI doesn't naively load everything. It uses an **Organic Multi-Category Index**; nodes overlap across systems based on their `dependents`. A Router classifies the user's intent to selectively pull only the EXACT architectural *Hive* (e.g., "AI Services") from the database out of the thousands of files.
+
+5. **Real-Time Materialization** — The SSE stream broadcasts each completed analysis instantly. The graph transitions from a "ghosted blueprint" to a fully "materialized" architecture as each node lights up, making the analysis process visible and engaging.
+
+### The 5-Layer Retrieval Architecture (RAG)
+
+Because prompting an LLM with thousands of files is impossible, RepoScope AI uses a state-of-the-art **Multi-Layer Query Router** to precisely filter context before initiating a chat:
+
+1. **Exact Match (`exports / imports`)**: Targeting precise function names, models, or hooks.
+2. **Fuzzy Search (`content / path`)**: Keyword text search indexed by MongoDB.
+3. **Semantic Tagging**: Querying by `architectural_role` automatically attached to nodes during materialization.
+4. **Dependency Graph Traversal (`$graphLookup`)**: Impact analysis tracing exact DAG lineage across edges.
+5. **Hive Categorization**: Matching abstract concepts ("Where is the AI logic?") to dynamic functional arrays assigned to files by analyzing their dependents.
 
 ### Data Flow
 
