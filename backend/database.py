@@ -19,6 +19,14 @@ async def connect_db():
         name="repo_file_unique_index",
     )
 
+    await db.files.create_index("exports")
+    await db.files.create_index("imports")
+    await db.files.create_index(
+        [("path", "text"), ("content", "text")],
+        language_override="dummy_language"
+    )
+
+
     await db.repo_understandings.create_index(
         "repo_id",
         unique=True,
@@ -46,6 +54,9 @@ async def connect_db():
     # Pre-analysis indexes
     await db.node_analysis.create_index([("repo_id", 1), ("file_path", 1)], unique=True)
     await db.node_analysis.create_index([("repo_id", 1), ("status", 1)])
+    await db.node_analysis.create_index("analysis.architectural_role")
+    await db.node_analysis.create_index("analysis.functional_categories")
+    await db.node_analysis.create_index("analysis.key_patterns")
     await db.repo_analysis.create_index([("repo_id", 1)], unique=True)
 
     print("Connected to MongoDB Atlas")

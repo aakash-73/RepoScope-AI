@@ -74,7 +74,12 @@ function CodeNode({ data, selected }) {
         opacity: isPending ? 0.45 : 1,
         filter: isPending ? "grayscale(80%) brightness(0.8)" : "grayscale(0%) brightness(1)",
       }}
-      transition={{ type: "spring", stiffness: 500, damping: 30 }}
+      transition={{ 
+        type: "spring", 
+        stiffness: 500, 
+        damping: 30,
+        filter: { type: "tween", duration: 0.3 }
+      }}
       className={`
         relative rounded-xl border transition-all duration-300 cursor-pointer
         ${selected

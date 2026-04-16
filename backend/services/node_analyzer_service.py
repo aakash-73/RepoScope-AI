@@ -30,6 +30,7 @@ Respond ONLY with a valid JSON object in this exact structure, no extra text:
     "filename": "reason this specific import exists"
   }},
   "architectural_role": "one of: entry_point / controller / service / model / helper / config / style / test",
+  "functional_categories": ["list of high-level functional systems this node belongs to (e.g. 'Authentication', 'AI Services', 'Database Integration'). Look at dependents_list to map ubiquitous files like configs to multiple overlapping categories based on what systems call them!"],
   "key_patterns": ["patterns and frameworks detected"],
   "concerns": ["potential architectural issues if any"],
   "summary_for_dependents": "one line summary for files that import this"

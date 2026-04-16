@@ -12,8 +12,8 @@ function CodeBlock({ children }) {
     const code = Array.isArray(children) ? children.join("") : children;
 
     return (
-        <div className="bg-black/30 rounded-lg overflow-hidden my-2">
-            <div className="flex justify-end px-2 py-1 border-b border-white/10">
+        <span className="block bg-black/30 rounded-lg overflow-hidden my-2">
+            <span className="flex justify-end px-2 py-1 border-b border-white/10">
                 <button
                     onClick={() => {
                         navigator.clipboard.writeText(code);
@@ -25,19 +25,27 @@ function CodeBlock({ children }) {
                     {copied ? <Check size={10} /> : <Copy size={10} />}
                     {copied ? "Copied" : "Copy"}
                 </button>
-            </div>
-            <pre className="p-3 text-xs overflow-auto text-slate-300">
+            </span>
+            <span className="block p-3 text-xs overflow-auto text-slate-300 whitespace-pre">
                 <code>{code}</code>
-            </pre>
-        </div>
+            </span>
+        </span>
     );
 }
 
 const mdComponents = {
-    code({ node, inline, className, children, ...props }) {
-        if (inline) {
+    pre({ children }) {
+        const codeText = children?.props?.children || children;
+        return <CodeBlock>{codeText}</CodeBlock>;
+    },
+    code({ className, children, node, ...props }) {
+        const match = /language-(\w+)/.exec(className || '');
+        const text = String(children);
+        const isBlock = match || text.includes('\n');
+        
+        if (!isBlock) {
             return (
-                <code className="bg-moss/15 text-moss px-1 py-0.5 rounded text-xs font-mono">
+                <code className="bg-moss/15 text-moss px-1 py-0.5 rounded text-xs font-mono" {...props}>
                     {children}
                 </code>
             );

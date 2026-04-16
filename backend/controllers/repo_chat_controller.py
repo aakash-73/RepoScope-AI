@@ -180,7 +180,16 @@ async def repo_chat(repo_id: str, query: str, history: list[dict]) -> dict:
     """
     db = get_db()
 
-    # Try pre-analyzed context first
+    # 1. First run the deterministic query router
+    from services.query_router_service import execute_router_search
+    strategy, filtered_context = await execute_router_search(repo_id, query)
+    
+    if strategy:
+        logger.info("Using filtered router context (strategy: %s) for chat: %s", strategy, repo_id)
+        reply = await chat_with_repo(filtered_context, query, history)
+        return {"reply": reply}
+
+    # 2. Fallback to pre-analyzed context
     pre_analyzed = await get_pre_analyzed_repo_context(repo_id)
     if pre_analyzed:
         logger.info("Using pre-analyzed repo context for chat: %s", repo_id)
