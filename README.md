@@ -102,6 +102,7 @@ The result: a **living, queryable knowledge base** for any codebase, built in mi
 ### Core Intelligence
 
 - **🔗 Interactive Dependency Graph** — Visualize how every file in a repo connects through imports/exports in a zoomable, pannable React Flow canvas
+- **🚀 Parallel Analysis Engine** — Topologically sorts and processes non-dependent leaf nodes concurrently to dramatically speed up repo ingestion
 - **🤖 Per-Node AI Analysis** — Every file is analyzed by an LLM for purpose, architectural role, patterns, concerns, and a one-line summary for dependents
 - **🧠 Repo-Level Understanding** — Synthesized overview of the entire repository: tech stack, architecture, entry points, data flow, and key components
 - **💬 AI Chat with Hive Network Routing** — Ask freeform questions about the entire repository. The **Query Router** dynamically maps your query to distinct conceptual "Hives" (e.g. *AI Services*, *Database*) precisely fetching the right context.
@@ -119,11 +120,14 @@ The result: a **living, queryable knowledge base** for any codebase, built in mi
 ### Visual & UX
 
 - **✨ Dynamic Architectural Materialization** — Nodes start ghosted (blueprint) and "solidify" in real-time as the AI finishes analysis, with spring animations
+- **⚡ Streaming RAG Chat** — AI responses stream token-by-token for near-instant First Token Latency, with automated backend reasoning stripping
 - **📡 Real-Time SSE Streaming** — Server-Sent Events stream analysis progress live (no polling)
+- **⌨️ Global Keyboard Shortcuts** — Rapidly navigate using `F` (Fit View), `S` (Toggle Semantic View), and `C` (Toggle Chat)
+- **💻 Native Source Preview** — Instantly view syntax-highlighted raw file code directly in the component sidebar
 - **📊 Progress UI** — Floating progress bar, toast notifications, and inline mini-progress in the repo list
-- **🎨 Language Color Legend** — Per-language color coding with customizable color picker
+- **🎨 Language Color Legend & Minimap** — Per-language color coding dynamically mirrors across the main canvas, the legend, and the minimap
 - **🔎 Graph Search** — Fuzzy filename search with highlight-and-jump
-- **📤 Graph Export** — Export as PNG (1x/2x/4x), SVG, or JSON
+- **📤 Graph Export** — Export as PNG (1x/2x/4x), SVG, raw JSON data, or Markdown-ready Mermaid diagrams
 - **🗂️ Folder Grouping** — Nodes visually grouped by directory
 - **🔄 Repository Sync** — Incremental sync with GitHub (only re-analyzes changed files + their dependents)
 
@@ -244,8 +248,8 @@ npm run dev
 
 ### Syncing with GitHub
 
-- Click the **sync icon** next to a repo → Only changed files are re-downloaded and re-analyzed
-- Dependents of changed files are automatically re-analyzed to keep context accurate
+- **Manual Sync** → Click the sync icon next to a repo to incrementally re-download and analyze only the changed files (and their dependents).
+- **Background Auto-Sync** → Toggle the "Auto-sync" settings gear on any active repo to let RepoScope AI automatically poll for updates in the background (configurable to 1h, 6h, 12h, or 24h intervals). Visual file diffs (+ added, ~ modified, - deleted) render directly in the UI.
 
 ---
 
@@ -528,7 +532,10 @@ reposcope-ai/
 │   │   ├── graph_service.py           # Graph data access helpers
 │   │   ├── node_analyzer_service.py   # Background per-node LLM analysis pipeline
 │   │   ├── groq_service.py            # LLM service (explain, chat, retry logic)
-│   │   ├── repo_chat_service.py       # Repo-level understanding + chat
+│   │   ├── repo_chat_service.py       # Repo-level understanding + streaming chat
+│   │   ├── query_router_service.py    # Hive Network Router mapping queries to concepts
+│   │   ├── graph_aggregator_service.py# Aggregates graph data into semantic clusters
+│   │   ├── auto_sync_service.py       # Background polling engine for repository updates
 │   │   ├── sync_service.py            # Incremental repo sync with GitHub
 │   │   ├── language_registry.py       # Language color registry (MongoDB)
 │   │   ├── llm_import_extractor.py    # Fallback LLM-based import extraction
@@ -557,22 +564,26 @@ reposcope-ai/
 │       │   └── GraphPage.jsx          # Main page: repo selection, graph, SSE, progress
 │       ├── components/
 │       │   ├── graph/
-│       │   │   ├── GraphCanvas.jsx    # React Flow canvas + Dagre layout engine
-│       │   │   ├── CodeNode.jsx       # Custom node: badges, ghost/solid animation
+│       │   │   ├── GraphCanvas.jsx    # React Flow canvas + Layout managers
+│       │   │   ├── CodeNode.jsx       # Custom node: badges, ghost/solid, semantic styling
 │       │   │   ├── FlowEdge.jsx       # Custom edge: circular highlight, coupling width
 │       │   │   ├── FolderGroup.jsx    # Folder boundary rectangles
 │       │   │   ├── GraphSearch.jsx    # Fuzzy search + highlight + jump-to
 │       │   │   ├── LanguageLegend.jsx # Color legend + custom color picker
-│       │   │   └── Graphexportdialog.jsx # Export modal (PNG/SVG/JSON)
+│       │   │   └── Graphexportdialog.jsx # Export modal (PNG/SVG/JSON/Mermaid)
 │       │   ├── sidebar/
-│       │   │   ├── ComponentSidebar.jsx # Node detail: analysis, impact, chat
-│       │   │   └── RepoList.jsx       # Left sidebar: repo list + status + progress
+│       │   │   ├── ComponentSidebar.jsx # Node detail: analysis, impact, source preview
+│       │   │   └── RepoList.jsx       # Left sidebar: repo list, progress, auto-sync settings
 │       │   ├── chat/
-│       │   │   └── Repochatpanel.jsx  # Floating repo-level Q&A chat panel
+│       │   │   └── Repochatpanel.jsx  # Floating repo-level streaming Q&A chat panel
 │       │   └── ui/
 │       │       └── ImportDialog.jsx   # Repo import modal
 │       └── lib/
-│           └── api.js                 # All API calls (axios)
+│           ├── api.js                 # All API calls (axios)
+│           ├── force-layout.js        # D3-Force layout engine for Semantic View
+│           ├── graph-layout.js        # Dagre tree layout engine for Structure View
+│           ├── useKeyboardShortcuts.js# Global keyboard bindings hook
+│           └── utils.js               # Common utilities and formatters
 │
 ├── screenshots/                       # Feature screenshots for documentation
 ├── ecosystem.config.cjs               # PM2 process manager configuration
@@ -620,6 +631,7 @@ Interactive Swagger docs: `http://localhost:8000/docs`
 | `DELETE` | `/api/v1/repos/{id}` | Delete a repository and all its data |
 | `POST` | `/api/v1/repos/{id}/retry` | Retry a failed import |
 | `POST` | `/api/v1/repos/{id}/sync` | Incrementally sync with GitHub |
+| `PATCH` | `/api/v1/repos/{id}/sync-settings`| Configure background auto-sync intervals |
 
 ### Graph & Analysis
 
@@ -632,16 +644,18 @@ Interactive Swagger docs: `http://localhost:8000/docs`
 | `GET` | `/api/v1/analysis/{id}/status` | Get analysis progress |
 | `GET` | `/api/v1/analysis/{id}/stream` | SSE stream for real-time progress |
 
-### AI Chat
+### AI Chat & Content
 
 | Method | Endpoint | Description |
 |---|---|---|
 | `POST` | `/api/v1/component/chat` | Chat about a specific file |
 | `GET` | `/api/v1/repo/{id}/summary` | Get/generate repo-level AI summary |
 | `POST` | `/api/v1/repo/{id}/chat` | Chat about the entire repository |
+| `POST` | `/api/v1/repo/{id}/chat/stream` | Token-by-token streaming chat for the repo |
 | `GET` | `/api/v1/repo/{id}/chat/history` | Fetch chat history |
 | `DELETE` | `/api/v1/repo/{id}/chat/history` | Clear chat history |
 | `GET` | `/api/v1/repo/{id}/insights` | Get proactive AI insights |
+| `GET` | `/api/v1/repo/{id}/file/content` | Fetch raw syntax-highlighted source code |
 
 ### Languages
 

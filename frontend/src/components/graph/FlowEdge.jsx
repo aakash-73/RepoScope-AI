@@ -1,5 +1,5 @@
 import React, { memo } from "react";
-import { getSmoothStepPath } from "@xyflow/react";
+import { BaseEdge, getSmoothStepPath, getStraightPath } from "@xyflow/react";
 
 const CHAIN_CONFIG = {
   "direct-upstream": { color: "#F59E0B", opacity: 0.95, strokeW: 2.2, showDots: true, glow: true },
@@ -12,6 +12,7 @@ function FlowEdge({
   id,
   sourceX, sourceY,
   targetX, targetY,
+  sourcePosition, targetPosition, // explicitly unpack these in the props
   style = {},
   data,
 }) {
@@ -65,42 +66,71 @@ function FlowEdge({
     dashArray = isPending ? "4 4" : undefined;
   }
 
+  const isSemantic = data?.isSemantic === true;
+  
   const dx = targetX - sourceX;
   const dy = targetY - sourceY;
-  const absDx = Math.abs(dx);
-  const absDy = Math.abs(dy);
 
-  let srcPos, tgtPos;
-  if (absDy > absDx * 1.2) {
-    srcPos = dy > 0 ? "bottom" : "top";
-    tgtPos = dy > 0 ? "top" : "bottom";
-  } else if (absDx > absDy * 1.2) {
-    srcPos = dx > 0 ? "right" : "left";
-    tgtPos = dx > 0 ? "left" : "right";
+  let edgePath;
+  if (isSemantic) {
+    // Override structural edge colors with pure visibility for semantic view
+    color = "#FFFFFF"; 
+    opacity = hovering ? 1 : 0.85;
+    strokeW = hovering ? 2 : 1;
+    showGlow = false;
+    showDots = false;
+    dashArray = undefined;
+
+    // Use React Flow's native utility for computing the straight path safely
+    const [straightPath] = getStraightPath({
+      sourceX, sourceY, targetX, targetY
+    });
+    edgePath = straightPath;
   } else {
-    if (dy > 0) {
-      srcPos = absDx > absDy ? (dx > 0 ? "right" : "left") : "bottom";
-      tgtPos = absDx > absDy ? (dx > 0 ? "left" : "right") : "top";
+    const absDx = Math.abs(dx);
+    const absDy = Math.abs(dy);
+
+    let srcPos, tgtPos;
+    if (absDy > absDx * 1.2) {
+      srcPos = dy > 0 ? "bottom" : "top";
+      tgtPos = dy > 0 ? "top" : "bottom";
+    } else if (absDx > absDy * 1.2) {
+      srcPos = dx > 0 ? "right" : "left";
+      tgtPos = dx > 0 ? "left" : "right";
     } else {
-      srcPos = absDx > absDy ? (dx > 0 ? "right" : "left") : "top";
-      tgtPos = absDx > absDy ? (dx > 0 ? "left" : "right") : "bottom";
+      if (dy > 0) {
+        srcPos = absDx > absDy ? (dx > 0 ? "right" : "left") : "bottom";
+        tgtPos = absDx > absDy ? (dx > 0 ? "left" : "right") : "top";
+      } else {
+        srcPos = absDx > absDy ? (dx > 0 ? "right" : "left") : "top";
+        tgtPos = absDx > absDy ? (dx > 0 ? "left" : "right") : "bottom";
+      }
     }
+
+    const borderRadius = isCross ? 20 : 10;
+    const offset = isCross ? 60 : 30;
+
+    const [stepPath] = getSmoothStepPath({
+      sourceX, sourceY, sourcePosition: srcPos,
+      targetX, targetY, targetPosition: tgtPos,
+      borderRadius, offset,
+    });
+    edgePath = stepPath;
   }
-
-  const borderRadius = isCross ? 20 : 10;
-  const offset = isCross ? 60 : 30;
-
-  const [edgePath] = getSmoothStepPath({
-    sourceX, sourceY, sourcePosition: srcPos,
-    targetX, targetY, targetPosition: tgtPos,
-    borderRadius, offset,
-  });
 
   const len = Math.sqrt(dx * dx + dy * dy);
   const duration = Math.min(2.8, Math.max(0.5, len / 180));
 
   const markerId = `arr_${id}`;
   const pathId = `fp_${id}`;
+  
+  if (isSemantic) {
+    color = "#FFFFFF"; // Pure white to guarantee peak visibility
+    opacity = hovering ? 1 : 0.85;
+    strokeW = hovering ? 2 : 1;
+    showGlow = false; // No neon glow for the clean cyber-architecture look
+    showDots = false; // No moving dots to reduce noise
+  }
 
   return (
     <>
@@ -129,18 +159,16 @@ function FlowEdge({
         />
       )}
 
-      <path
-        d={edgePath}
-        fill="none"
-        stroke={color}
-        strokeWidth={strokeW}
-        strokeOpacity={opacity}
-        strokeDasharray={dashArray}
+      <BaseEdge
+        path={edgePath}
+        id={id}
         markerEnd={`url(#${markerId})`}
         style={{
-          pointerEvents: "visibleStroke",
-          cursor: "default",
-          transition: "stroke 0.15s ease, stroke-opacity 0.15s ease, stroke-width 0.15s ease",
+          stroke: color,
+          strokeWidth: strokeW,
+          opacity: opacity,
+          strokeDasharray: dashArray,
+          transition: "stroke 0.15s ease, opacity 0.15s ease, stroke-width 0.15s ease"
         }}
       />
 

@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from typing import Optional, Dict, Any, List
 import openai
 from openai import AsyncOpenAI
@@ -33,8 +34,56 @@ _router_client = AsyncOpenAI(
 )
 
 def _strip_thinking(text: str) -> str:
-    import re
     return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+
+
+def _extract_core_keywords(entities: List[str]) -> List[str]:
+    """
+    Break multi-word entity phrases into individual core keywords.
+    e.g. ["service files", "controllers"] -> ["service", "files", "controller", "controllers"]
+    Also deduplicates and strips common stop words.
+    """
+    STOP_WORDS = {"files", "the", "a", "an", "all", "of", "for", "and", "or", "with", "in", "on", "to"}
+    keywords = set()
+    for entity in entities:
+        # Split on spaces and hyphens
+        parts = re.split(r"[\s\-_]+", entity.lower())
+        for part in parts:
+            part = part.strip()
+            if part and part not in STOP_WORDS and len(part) > 1:
+                keywords.add(part)
+                # Also add singular form for simple plurals
+                if part.endswith("s") and len(part) > 3:
+                    keywords.add(part[:-1])
+    # Always include the original entities too (for exact matches)
+    for entity in entities:
+        if entity.strip():
+            keywords.add(entity.strip())
+    return list(keywords)
+
+
+def _score_files_by_relevance(files: List[dict], query: str) -> List[dict]:
+    """
+    Re-rank retrieved files by keyword overlap with the query.
+    Returns top 15 most relevant files.
+    """
+    query_words = set(re.findall(r"\w+", query.lower()))
+    STOP = {"the", "a", "an", "is", "are", "what", "how", "where", "does", "do", "it", "this", "i", "me", "my"}
+    query_words -= STOP
+
+    def score(f: dict) -> int:
+        text = " ".join([
+            f.get("path", ""),
+            f.get("name", ""),
+            " ".join(f.get("imports", [])),
+            " ".join(f.get("exports", [])),
+            f.get("content", "")[:500],
+        ]).lower()
+        return sum(1 for w in query_words if w in text)
+
+    scored = sorted(files, key=score, reverse=True)
+    return scored[:15]
+
 
 async def determine_intent(repo_id: str, query: str) -> dict:
     try:
@@ -53,7 +102,6 @@ async def determine_intent(repo_id: str, query: str) -> dict:
         )
         content = _strip_thinking(response.choices[0].message.content or "{}")
         
-        # Clean markdown if present
         clean = content.strip()
         if clean.startswith("```"):
             clean = clean.split("```")[1]
@@ -65,20 +113,27 @@ async def determine_intent(repo_id: str, query: str) -> dict:
         logger.warning(f"Router intent classification failed: {e}")
         return {"strategy": "unknown", "entities": []}
 
+
 async def query_exact_match(repo_id: str, entities: List[str]) -> List[dict]:
     db = get_db()
     if not entities:
         return []
-        
-    regexes = [{"$regex": f"^{e}$", "$options": "i"} for e in entities]
+
+    # Use $elemMatch per entity for array fields, direct regex for string fields
+    or_clauses = []
+    for e in entities:
+        pattern = {"$regex": f"^{re.escape(e)}$", "$options": "i"}
+        or_clauses.append({"exports": {"$elemMatch": pattern}})
+        or_clauses.append({"imports": {"$elemMatch": pattern}})
+        or_clauses.append({"name": pattern})
+        or_clauses.append({"path": {"$regex": re.escape(e), "$options": "i"}})
+
     cursor = db.files.find({
         "repo_id": repo_id,
-        "$or": [
-            {"exports": {"$in": regexes}},
-            {"imports": {"$in": regexes}}
-        ]
+        "$or": or_clauses
     })
     return await cursor.to_list(length=30)
+
 
 async def query_fuzzy_search(repo_id: str, entities: List[str]) -> List[dict]:
     db = get_db()
@@ -91,37 +146,53 @@ async def query_fuzzy_search(repo_id: str, entities: List[str]) -> List[dict]:
     }).sort([("score", {"$meta": "textScore"})])
     return await cursor.to_list(length=20)
 
+
 async def query_semantic(repo_id: str, entities: List[str]) -> List[dict]:
     db = get_db()
     if not entities:
         return []
 
-    regexes = [{"$regex": e, "$options": "i"} for e in entities]
+    # Extract core keywords from potentially multi-word phrases
+    keywords = _extract_core_keywords(entities)
+    logger.info(f"Semantic search keywords: {keywords}")
+
+    # Build $or clauses — $elemMatch for array fields, direct $regex for string fields
+    or_clauses = []
+    for kw in keywords:
+        pattern = {"$regex": kw, "$options": "i"}
+        or_clauses.append({"analysis.architectural_role": pattern})
+        or_clauses.append({"analysis.key_patterns": {"$elemMatch": pattern}})
+        or_clauses.append({"analysis.functional_categories": {"$elemMatch": pattern}})
+
     cursor = db.node_analysis.find({
         "repo_id": repo_id,
-        "$or": [
-            {"analysis.architectural_role": {"$in": regexes}},
-            {"analysis.key_patterns": {"$in": regexes}}
-        ]
+        "$or": or_clauses
     })
     results = await cursor.to_list(length=30)
-    
+
     file_paths = [r["file_path"] for r in results]
     if not file_paths:
         return []
-    
+
     f_cursor = db.files.find({"repo_id": repo_id, "path": {"$in": file_paths}})
     return await f_cursor.to_list(length=30)
+
 
 async def query_graph(repo_id: str, entities: List[str]) -> List[dict]:
     db = get_db()
     if not entities:
         return []
 
-    regexes = [{"$regex": e, "$options": "i"} for e in entities]
-    
+    # Extract core keywords and build partial regex matching on path or name
+    keywords = _extract_core_keywords(entities)
+    path_or = []
+    for kw in keywords:
+        pat = {"$regex": kw, "$options": "i"}
+        path_or.append({"path": pat})
+        path_or.append({"name": pat})
+
     pipeline = [
-        {"$match": {"repo_id": repo_id, "path": {"$in": regexes}}},
+        {"$match": {"repo_id": repo_id, "$or": path_or}},
         {
             "$graphLookup": {
                 "from": "files",
@@ -136,7 +207,7 @@ async def query_graph(repo_id: str, entities: List[str]) -> List[dict]:
     ]
     cursor = db.files.aggregate(pipeline)
     results = await cursor.to_list(length=20)
-    
+
     final_files = []
     seen = set()
     for root in results:
@@ -147,27 +218,50 @@ async def query_graph(repo_id: str, entities: List[str]) -> List[dict]:
             if dep["path"] not in seen:
                 seen.add(dep["path"])
                 final_files.append(dep)
-                
-    # Also fetch the parents
+
     return final_files
+
 
 async def query_hive_search(repo_id: str, entities: List[str]) -> List[dict]:
     db = get_db()
     if not entities:
         return []
 
-    cursor = db.node_analysis.find({
+    # Fuzzy match category labels using $regex instead of exact $in
+    cat_or = [{"label": {"$regex": e, "$options": "i"}} for e in entities]
+    cat_cursor = db.kg_nodes.find({
         "repo_id": repo_id,
-        "analysis.functional_categories": {"$in": entities}
-    })
-    results = await cursor.to_list(length=30)
-    
-    file_paths = [r["file_path"] for r in results]
+        "type": "category",
+        "$or": cat_or,
+    }, {"id": 1})
+    categories = await cat_cursor.to_list(length=None)
+    cat_ids = [c["id"] for c in categories]
+
+    if not cat_ids:
+        # Fallback: search node_analysis functional_categories with regex
+        kws = _extract_core_keywords(entities)
+        kw_or = [{"analysis.functional_categories": {"$elemMatch": {"$regex": kw, "$options": "i"}}} for kw in kws]
+        cursor = db.node_analysis.find({
+            "repo_id": repo_id,
+            "$or": kw_or
+        })
+        results = await cursor.to_list(length=20)
+        file_paths = [r["file_path"] for r in results]
+    else:
+        edge_cursor = db.kg_edges.find({
+            "repo_id": repo_id,
+            "target": {"$in": cat_ids},
+            "relation": "belongs_to"
+        }, {"source": 1})
+        edges = await edge_cursor.to_list(length=None)
+        file_paths = list(set(e["source"] for e in edges))
+
     if not file_paths:
         return []
-    
+
     f_cursor = db.files.find({"repo_id": repo_id, "path": {"$in": file_paths}})
-    return await f_cursor.to_list(length=30)
+    return await f_cursor.to_list(length=15)
+
 
 async def execute_router_search(repo_id: str, query: str) -> tuple[Optional[str], str]:
     """
@@ -177,9 +271,9 @@ async def execute_router_search(repo_id: str, query: str) -> tuple[Optional[str]
     intent = await determine_intent(repo_id, query)
     strategy = intent.get("strategy", "unknown")
     entities = intent.get("entities", [])
-    
+
     logger.info(f"Router classified query as '{strategy}' with entities: {entities}")
-    
+
     files = []
     if strategy == "exact_match":
         files = await query_exact_match(repo_id, entities)
@@ -191,21 +285,25 @@ async def execute_router_search(repo_id: str, query: str) -> tuple[Optional[str]
         files = await query_graph(repo_id, entities)
     elif strategy == "hive_search":
         files = await query_hive_search(repo_id, entities)
-        
-    if not files or len(files) == 0:
+
+    if not files:
         logger.info(f"Router strategy '{strategy}' yielded no results. Falling back to full repo context.")
         return None, ""
-        
-    # Format specific files into context instead of entire repo
+
+    # Re-rank by keyword relevance and cap to top 15
+    files = _score_files_by_relevance(files, query)
+    logger.info(f"Router strategy '{strategy}' yielded {len(files)} files after re-ranking.")
+
+    # Build context
     from services.repo_chat_service import build_repo_context
     db = get_db()
-    
+
     paths = [f["path"] for f in files]
     expl_cursor = db.node_analysis.find({"repo_id": repo_id, "file_path": {"$in": paths}, "status": "done"})
     explanations_docs = await expl_cursor.to_list(length=None)
     explanations_map = {doc["file_path"]: json.dumps(doc.get("analysis", {}), indent=2) for doc in explanations_docs}
-    
+
     context_str = build_repo_context(files, explanations_map)
     info_str = f"Filtered context resolved via '{strategy}' index lookup for {len(files)} files.\n\n{context_str}"
-    
+
     return strategy, info_str

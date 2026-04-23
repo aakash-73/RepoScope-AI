@@ -73,6 +73,8 @@ export default function GraphExportDialog({ repoName, onExport, onClose }) {
                             {[
                                 { id: "png", Icon: Image, label: "PNG", sub: "Raster · great for sharing" },
                                 { id: "svg", Icon: FileCode, label: "SVG", sub: "Vector · infinitely scalable" },
+                                { id: "json", Icon: FileCode, label: "JSON", sub: "Raw data · raw node array" },
+                                { id: "mermaid", Icon: FileCode, label: "Mermaid", sub: "Text diagram · markdown ready" },
                             ].map(({ id, Icon, label, sub }) => (
                                 <button key={id} onClick={() => setFormat(id)}
                                     className={`flex items-start gap-2.5 p-3 rounded-xl border transition-all text-left ${format === id
@@ -80,10 +82,10 @@ export default function GraphExportDialog({ repoName, onExport, onClose }) {
                                             : "bg-white/3 border-white/8 text-slate-500 hover:border-white/15 hover:text-slate-400"
                                         }`}
                                 >
-                                    <Icon size={14} className={`mt-0.5 ${format === id ? "text-moss" : ""}`} />
-                                    <div>
+                                    <Icon size={14} className={`mt-0.5 flex-shrink-0 ${format === id ? "text-moss" : ""}`} />
+                                    <div className="min-w-0">
                                         <p className="text-xs font-display font-semibold leading-none">{label}</p>
-                                        <p className="text-[10px] mt-1 leading-tight opacity-70">{sub}</p>
+                                        <p className="text-[10px] mt-1 leading-tight opacity-70 truncate">{sub}</p>
                                     </div>
                                 </button>
                             ))}

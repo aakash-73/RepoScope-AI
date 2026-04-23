@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef } from "react";
+import React, { useState, useCallback, useRef, useEffect } from "react";
 import { ReactFlowProvider } from "@xyflow/react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -14,6 +14,7 @@ import GraphExportDialog from "../components/graph/Graphexportdialog";
 import LanguageLegend from "../components/graph/LanguageLegend";
 import GraphSearch from "../components/graph/GraphSearch";
 import { fetchGraph, reanalyzeNode } from "../lib/api";
+import { useKeyboardShortcuts } from "../lib/useKeyboardShortcuts";
 
 // Build the SSE URL from the same base as the API
 const SSE_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
@@ -35,6 +36,7 @@ export default function GraphPage() {
   const [isBuildMode, setIsBuildMode] = useState(true);
   const [chatOpen, setChatOpen] = useState(false);
   const [graphKey, setGraphKey] = useState(0);
+  const [viewType, setViewType] = useState("structure"); // "structure" or "semantic"
 
   const lastClickedNodeId = useRef(null);
   const lastClickTimeRef = useRef(0);
@@ -45,6 +47,15 @@ export default function GraphPage() {
     if (!graphCanvasRef.current) throw new Error("Graph not loaded.");
     await graphCanvasRef.current.exportGraph(format, scale, selectedRepo?.name);
   }, [selectedRepo]);
+
+  // ── Global Keyboard Shortcuts ───────────────────────────────────────────
+  useKeyboardShortcuts({
+    fitView: () => graphCanvasRef.current?.fitGraph(),
+    toggleSemantic: () => setViewType(v => v === "structure" ? "semantic" : "structure"),
+    toggleChat: () => {
+      if (selectedRepo) setChatOpen(o => !o);
+    }
+  });
 
   // ── Close any open SSE connection ──────────────────────────────────────
   const closeSSE = useCallback(() => {
@@ -152,7 +163,7 @@ export default function GraphPage() {
           }));
           // Small delay so the last DB writes land before we fetch
           await new Promise((r) => setTimeout(r, 1500));
-          const data = await fetchGraph(repoId);
+          const data = await fetchGraph(repoId, viewType);
           setGraphData(data);
           break;
         }
@@ -182,9 +193,8 @@ export default function GraphPage() {
     closeSSE();
 
     try {
-      // Fetch the initial graph — all nodes start with whatever analysis_status
-      // is already in the DB (pending / analyzing / done / failed).
-      const data = await fetchGraph(repo.repo_id);
+      // Fetch the initial graph based on current viewType
+      const data = await fetchGraph(repo.repo_id, viewType);
       setGraphData(data);
       setGraphKey((k) => k + 1);
 
@@ -200,7 +210,25 @@ export default function GraphPage() {
     } finally {
       setGraphLoading(false);
     }
-  }, [closeSSE, openSSE]);
+  }, [closeSSE, openSSE, viewType]);
+
+  // ── Re-fetch graph when viewType changes ────────────────────────────────
+  useEffect(() => {
+    if (!selectedRepo) return;
+    const refetch = async () => {
+      setGraphLoading(true);
+      try {
+        const data = await fetchGraph(selectedRepo.repo_id, viewType);
+        setGraphData(data);
+        setGraphKey((k) => k + 1);
+      } catch (err) {
+          setGraphError("Failed to switch view.");
+      } finally {
+          setGraphLoading(false);
+      }
+    };
+    refetch();
+  }, [viewType, selectedRepo?.repo_id]);
 
   const handleLanguageColorChange = useCallback((key, newColor) => {
     setGraphData((prev) => {
@@ -230,7 +258,7 @@ export default function GraphPage() {
     // The SSE stream will handle the solidification animation for re-analyzed nodes.
     if (syncResult.added > 0 || syncResult.deleted > 0 || syncResult.modified > 0) {
       try {
-        const data = await fetchGraph(syncedRepoId);
+        const data = await fetchGraph(syncedRepoId, viewType);
         setGraphData(data);
         setGraphKey((k) => k + 1);  // force folder expansion reset for new/modified nodes
 
@@ -417,6 +445,20 @@ export default function GraphPage() {
                 {isBuildMode ? "Build Mode: ON" : "Build Mode: OFF"}
               </button>
               <button
+                onClick={() => setViewType(viewType === "structure" ? "semantic" : "structure")}
+                title={viewType === "structure" ? "Switch to Semantic View" : "Switch to Structure View"}
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border transition-all text-xs font-display ${viewType === "semantic"
+                  ? "bg-blue-500/15 border-blue-500/30 text-blue-400"
+                  : "bg-white/5 border-white/10 text-slate-500 hover:text-slate-300"
+                  }`}
+              >
+                <div className="relative">
+                    <Network size={12} className={viewType === "semantic" ? "text-blue-400" : ""} />
+                    {viewType === "semantic" && <div className="absolute -top-1 -right-1 w-2 h-2 bg-blue-400 rounded-full animate-pulse" />}
+                </div>
+                {viewType === "semantic" ? "Semantic View" : "Structure View"}
+              </button>
+              <button
                 onClick={() => setShowExport(true)}
                 title="Export graph"
                 className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-white/5 border border-white/10 hover:bg-moss/15 hover:border-moss/30 text-slate-500 hover:text-moss transition-all text-xs font-display"
@@ -542,6 +584,7 @@ export default function GraphPage() {
           <LanguageLegend repoId={currentRepoId} isRepoOpen={isRepoOpen} />
           <GraphCanvas
             ref={graphCanvasRef}
+            className={viewType === "semantic" ? "view-semantic" : ""}
             graphData={displayData}
             graphKey={graphKey}
             isAnalyzing={isAnalyzing}

@@ -34,6 +34,11 @@ class SyncResponse(BaseModel):
     reanalyzed: int = 0
     message: str
     status: Literal["synced", "no_changes", "failed"] = "synced"
+    # File-level diff for the frontend SyncDiffPanel
+    added_files: List[str] = Field(default_factory=list)
+    modified_files: List[str] = Field(default_factory=list)
+    removed_files: List[str] = Field(default_factory=list)
+
 
 
 class ExplainRequest(BaseModel):
@@ -49,8 +54,8 @@ class ExplainResponse(BaseModel):
 
 class NodeData(BaseModel):
     label: str
-    file_path: str
-    language: str
+    file_path: Optional[str] = None
+    language: Optional[str] = "text"
     category: str = "other"
     sub_category: str = "other"
     node_color: str = "#6B7280"
@@ -92,6 +97,7 @@ class GraphResponse(BaseModel):
     nodes: List[GraphNode] = Field(default_factory=list)
     edges: List[GraphEdge] = Field(default_factory=list)
     circular_paths: List[List[str]] = Field(default_factory=list)
+    is_semantic: bool = False
 
 
 class RepositoryDoc(BaseModel):

@@ -13,8 +13,10 @@ import CodeNode from "./CodeNode";
 import FolderGroup from "./FolderGroup";
 import FlowEdge from "./FlowEdge";
 import { applyDagreLayout } from "../../lib/graph-layout";
+import { applyForceLayout } from "../../lib/force-layout";
+import { getLanguageColor } from "../../lib/utils";
 
-const nodeTypes = { codeNode: CodeNode, folderGroup: FolderGroup };
+const nodeTypes = { codeNode: CodeNode, folderGroup: FolderGroup, hubNode: CodeNode };
 const edgeTypes = { flowEdge: FlowEdge };
 
 function prepareEdges(rawEdges, rawNodes) {
@@ -27,6 +29,8 @@ function prepareEdges(rawEdges, rawNodes) {
     const isPending =
       srcData?.analysis_status === "pending" || tgtData?.analysis_status === "pending";
 
+    const isSemanticGraph = rawNodes?.length > 0 && rawNodes[0].data?.isSemantic === true;
+
     return {
       ...e,
       type: "flowEdge",
@@ -37,6 +41,7 @@ function prepareEdges(rawEdges, rawNodes) {
         cross_folder: (srcData?.folder || ".") !== (tgtData?.folder || "."),
         is_pending: isPending,
         dimmed: false,
+        isSemantic: isSemanticGraph, // Explicitly tag edges with the graph type
       },
     };
   });
@@ -106,7 +111,7 @@ function buildTransitiveChains(nodeId, rawEdges) {
 }
 
 const GraphCanvasInner = forwardRef(function GraphCanvasInner(
-  { graphData, graphKey, onNodeClick, isAnalyzing, onChatOpen, isChatOpen, repoName },
+  { graphData, graphKey, onNodeClick, isAnalyzing, onChatOpen, isChatOpen, repoName, className },
   ref
 ) {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
@@ -163,9 +168,10 @@ const GraphCanvasInner = forwardRef(function GraphCanvasInner(
       ...n,
       data: {
         ...n.data,
-        is_dead: deadIds.has(n.id),
-        complexity_score: complexScores[n.id] ?? 1,
-        is_circular: n.data?.is_circular || circularNodeIds.has(n.data?.file_path),
+        isSemantic: graphData.is_semantic,
+        is_dead: n.type === "codeNode" ? deadIds.has(n.id) : false,
+        complexity_score: n.type === "codeNode" ? (complexScores[n.id] ?? 1) : 1,
+        is_circular: n.type === "codeNode" ? (n.data?.is_circular || circularNodeIds.has(n.data?.file_path)) : false,
       },
     }));
 
@@ -226,11 +232,24 @@ const GraphCanvasInner = forwardRef(function GraphCanvasInner(
   // only needs to react to collapsedFolders and handleToggleCollapse.
   useEffect(() => {
     if (!taggedRef.current.nodes.length) return;
-    const { nodes: ln, edges: le } = applyDagreLayout(
-      taggedRef.current.nodes,
-      taggedRef.current.edges,
-      collapsedFolders
-    );
+    
+    let ln, le;
+    if (graphData.is_semantic) {
+      const result = applyForceLayout(
+        taggedRef.current.nodes,
+        taggedRef.current.edges
+      );
+      ln = result.nodes;
+      le = result.edges;
+    } else {
+      const result = applyDagreLayout(
+        taggedRef.current.nodes,
+        taggedRef.current.edges,
+        collapsedFolders
+      );
+      ln = result.nodes;
+      le = result.edges;
+    }
     const withCallbacks = ln.map((n) =>
       n.type === "folderGroup"
         ? { ...n, data: { ...n.data, onToggleCollapse: handleToggleCollapse } }
@@ -303,7 +322,7 @@ const GraphCanvasInner = forwardRef(function GraphCanvasInner(
     if (node.type === "folderGroup") return "rgba(255,255,255,0.06)";
     if (node.data?.is_circular) return "#FF4500";
     if (node.data?.is_dead) return "#6B7280";
-    return "#374151";
+    return getLanguageColor(node.data?.language) || "#374151";
   }, []);
 
   useImperativeHandle(ref, () => ({
@@ -339,7 +358,43 @@ const GraphCanvasInner = forwardRef(function GraphCanvasInner(
         return nds;
       });
     },
+    fitGraph() {
+      fitView({ padding: 0.12, duration: 500 });
+    },
     async exportGraph(format, scale, repoName) {
+      if (format === "json") {
+        const payload = JSON.stringify({ nodes, edges }, null, 2);
+        const blob = new Blob([payload], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.download = `${repoName || "graph"}-${new Date().toISOString().slice(0, 10)}.json`;
+        a.href = url;
+        a.click();
+        URL.revokeObjectURL(url);
+        return;
+      }
+
+      if (format === "mermaid") {
+        let mmd = "graph TD;\n";
+        nodes.forEach((n) => {
+          if (n.type === "codeNode") {
+            const cleanLabel = (n.data?.label || n.id).replace(/"/g, "'");
+            mmd += `  ${n.id}["${cleanLabel}"];\n`;
+          }
+        });
+        edges.forEach((e) => {
+          mmd += `  ${e.source} --> ${e.target};\n`;
+        });
+        const blob = new Blob([mmd], { type: "text/plain" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.download = `${repoName || "graph"}-${new Date().toISOString().slice(0, 10)}.mmd`;
+        a.href = url;
+        a.click();
+        URL.revokeObjectURL(url);
+        return;
+      }
+
       const renderer = document.querySelector(".react-flow__renderer");
       if (!renderer) throw new Error("ReactFlow renderer not found.");
 
@@ -509,7 +564,7 @@ const GraphCanvasInner = forwardRef(function GraphCanvasInner(
   }));
 
   return (
-    <div className="h-full w-full">
+    <div className={`w-full h-full relative group ${className}`}>
       <ReactFlow
         nodes={nodes} edges={edges}
         onNodesChange={onNodesChange} onEdgesChange={onEdgesChange}

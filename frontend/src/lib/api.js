@@ -25,8 +25,10 @@ export async function retryRepoImport(repoId) {
   return data;
 }
 
-export async function fetchGraph(repoId) {
-  const { data } = await api.get(`/graph/${repoId}`);
+export async function fetchGraph(repoId, viewType = "structure") {
+  const { data } = await api.get(`/graph/${repoId}`, {
+    params: { view_type: viewType },
+  });
   return data;
 }
 
@@ -117,3 +119,72 @@ export const syncRepo = async (repoId) => {
   const { data } = await api.post(`/repos/${repoId}/sync`);
   return data;
 };
+
+export async function updateSyncSettings(repoId, settings) {
+  const { data } = await api.patch(`/repos/${repoId}/sync-settings`, settings);
+  return data;
+}
+
+export async function getFileContent(repoId, filePath) {
+  const { data } = await api.get(`/repo/${repoId}/file/content`, {
+    params: { file_path: filePath },
+  });
+  return data;
+}
+
+/**
+ * Streams repo chat response token-by-token.
+ * onChunk(token: string) is called for each text chunk.
+ * onDone() is called when streaming finishes.
+ * Returns a controller so callers can abort.
+ */
+export function streamChatWithRepo(repoId, query, history, onChunk, onDone, onError) {
+  const controller = new AbortController();
+
+  (async () => {
+    try {
+      const resp = await fetch(`/api/v1/repo/${repoId}/chat/stream`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query, history }),
+        signal: controller.signal,
+      });
+
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+        onError?.(err.detail || "Stream failed");
+        return;
+      }
+
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        // SSE format: each event is "data: {...}\n\n"
+        const parts = buffer.split("\n\n");
+        buffer = parts.pop() ?? "";
+        for (const part of parts) {
+          const line = part.trim();
+          if (!line.startsWith("data:")) continue;
+          const raw = line.slice(5).trim();
+          if (raw === "[DONE]") { onDone?.(); return; }
+          try {
+            const parsed = JSON.parse(raw);
+            if (parsed.token) onChunk(parsed.token);
+            if (parsed.error) onError?.(parsed.error);
+          } catch { /* ignore malformed chunks */ }
+        }
+      }
+      onDone?.();
+    } catch (err) {
+      if (err.name !== "AbortError") onError?.(err.message);
+    }
+  })();
+
+  return controller;
+}

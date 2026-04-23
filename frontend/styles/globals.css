@@ -169,6 +169,19 @@
   margin-bottom: 0.2em;
 }
 
+.view-semantic .react-flow__background {
+  background: #000000 !important;
+}
+
+.view-semantic .react-flow__edge-path {
+  /* removed filter that causes Safari graphic acceleration issues */
+}
+
 .markdown-body strong {
   color: #e5e7eb;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
 }

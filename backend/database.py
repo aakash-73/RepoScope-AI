@@ -57,7 +57,12 @@ async def connect_db():
     await db.node_analysis.create_index("analysis.architectural_role")
     await db.node_analysis.create_index("analysis.functional_categories")
     await db.node_analysis.create_index("analysis.key_patterns")
-    await db.repo_analysis.create_index([("repo_id", 1)], unique=True)
+    # Knowledge Graph indexes
+    await db.kg_nodes.create_index([("repo_id", 1), ("id", 1)], unique=True)
+    await db.kg_nodes.create_index([("repo_id", 1), ("type", 1)])
+    await db.kg_edges.create_index([("repo_id", 1), ("source", 1)])
+    await db.kg_edges.create_index([("repo_id", 1), ("target", 1)])
+    await db.kg_edges.create_index([("repo_id", 1), ("relation", 1)])
 
     print("Connected to MongoDB Atlas")
 

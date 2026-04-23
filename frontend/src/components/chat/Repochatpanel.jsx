@@ -5,7 +5,8 @@ import {
     X, Loader2, Send, Bot, User,
     Sparkles, Copy, Check, RotateCcw,
 } from "lucide-react";
-import { fetchRepoSummary, chatWithRepo } from "../../lib/api";
+import { fetchRepoSummary, streamChatWithRepo } from "../../lib/api";
+
 
 function CodeBlock({ children }) {
     const [copied, setCopied] = useState(false);
@@ -103,14 +104,23 @@ function Message({ msg }) {
                 {isUser ? (
                     <p className="leading-relaxed">{msg.content}</p>
                 ) : (
-                    <ReactMarkdown components={mdComponents}>
-                        {msg.content}
-                    </ReactMarkdown>
+                    <span>
+                        <ReactMarkdown components={mdComponents}>
+                            {msg.content || " "}
+                        </ReactMarkdown>
+                        {msg.streaming && (
+                            <span
+                                className="inline-block w-1.5 h-3.5 bg-moss/80 rounded-sm ml-0.5 align-middle"
+                                style={{ animation: "blink 0.8s step-end infinite" }}
+                            />
+                        )}
+                    </span>
                 )}
             </div>
         </motion.div>
     );
 }
+
 
 function TypingIndicator() {
     return (
@@ -151,6 +161,10 @@ export default function RepoChatPanel({ open, onClose, repoId, repoName }) {
     const [error, setError] = useState(null);
     const bottomRef = useRef(null);
     const inputRef = useRef(null);
+    const streamingRef = useRef(null); // AbortController for in-flight stream
+
+    // Cancel stream on unmount
+    useEffect(() => () => streamingRef.current?.abort(), []);
 
     useEffect(() => {
         bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -160,13 +174,11 @@ export default function RepoChatPanel({ open, onClose, repoId, repoName }) {
         if (open) setTimeout(() => inputRef.current?.focus(), 150);
     }, [open]);
 
-    // Load summary the first time the panel opens for this repo
     useEffect(() => {
         if (!open || !repoId || messages.length > 0) return;
         loadSummary();
     }, [open, repoId]);
 
-    // Reset conversation when repo changes
     useEffect(() => {
         setMessages([]);
         setError(null);
@@ -194,16 +206,50 @@ export default function RepoChatPanel({ open, onClose, repoId, repoName }) {
         setInput("");
         setLoading(true);
         setError(null);
+
+        // Add a placeholder assistant message that will be filled incrementally
+        const assistantIndex = messages.length + 1;
+        setMessages((prev) => [...prev, { role: "assistant", content: "", streaming: true }]);
+
         const history = messages.map((m) => ({ role: m.role, content: m.content }));
 
-        try {
-            const res = await chatWithRepo(repoId, text, history);
-            setMessages((prev) => [...prev, { role: "assistant", content: res.reply }]);
-        } catch (err) {
-            setError(err.response?.data?.detail || "Chat failed. Please try again.");
-        } finally {
-            setLoading(false);
-        }
+        const ctrl = streamChatWithRepo(
+            repoId,
+            text,
+            history,
+            // onChunk — append token to the streaming message
+            (token) => {
+                setMessages((prev) => {
+                    const updated = [...prev];
+                    const last = updated[updated.length - 1];
+                    if (last?.streaming) {
+                        updated[updated.length - 1] = { ...last, content: last.content + token };
+                    }
+                    return updated;
+                });
+            },
+            // onDone
+            () => {
+                setMessages((prev) => {
+                    const updated = [...prev];
+                    const last = updated[updated.length - 1];
+                    if (last?.streaming) {
+                        updated[updated.length - 1] = { ...last, streaming: false };
+                    }
+                    return updated;
+                });
+                setLoading(false);
+                streamingRef.current = null;
+            },
+            // onError
+            (errMsg) => {
+                setError(errMsg || "Chat failed. Please try again.");
+                setMessages((prev) => prev.filter((m) => !m.streaming));
+                setLoading(false);
+                streamingRef.current = null;
+            }
+        );
+        streamingRef.current = ctrl;
     }
 
     const handleKey = (e) => {
@@ -214,6 +260,7 @@ export default function RepoChatPanel({ open, onClose, repoId, repoName }) {
     };
 
     if (!repoId) return null;
+
 
     return (
         <AnimatePresence>

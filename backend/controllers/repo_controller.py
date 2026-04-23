@@ -200,7 +200,7 @@ async def sync_repo_controller(repo_id: str) -> SyncResponse:
     return await sync_repository(repo_id)
 
 
-async def get_graph(repo_id: str) -> GraphResponse:
+async def get_graph(repo_id: str, view_type: str = "structure") -> GraphResponse:
     db = get_db()
 
     repo = await db.repositories.find_one({"repo_id": repo_id})
@@ -215,6 +215,19 @@ async def get_graph(repo_id: str) -> GraphResponse:
             "Please retry the import."
         )
 
+    # If semantic view is requested, use the aggregator
+    if view_type == "semantic":
+        from services.graph_aggregator_service import get_dual_view_graph
+        kg_data = await get_dual_view_graph(repo_id, "semantic")
+        return GraphResponse(
+            repo_id=repo_id,
+            nodes=kg_data["nodes"],
+            edges=kg_data["edges"],
+            circular_paths=[], # Not relevant for semantic view
+            is_semantic=True
+        )
+
+    # Baseline: structural view
     # Legacy support: ensure all nodes have analysis_status
     await db.files.update_many(
         {"repo_id": repo_id, "analysis_status": {"$exists": False}},

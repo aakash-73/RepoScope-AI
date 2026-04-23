@@ -86,34 +86,37 @@ async def analyze_all_nodes(repo_id: str):
                 {"$set": {"analysis_status": "pending"}}
             )
 
-    # ── Sequential processing — one file at a time ────────────────────────
-    # Removed asyncio.gather batching. Each file is fully analyzed and saved
-    # to MongoDB before the next one starts. This means:
-    #   1. The SSE stream emits one node_update at a time → clean animation
-    #   2. _fetch_dependency_summaries always finds "done" summaries for
-    #      already-processed dependencies (topological order guarantees this)
-    #   3. Only one LLM call is in-flight at any moment → less VRAM pressure
-    for file in sorted_files:
-        # Skip nodes already marked done (supports resuming interrupted runs)
+    # ── Parallel leaves + sequential dependents ───────────────────────────────
+    # Files with NO imports are true leaves and have no dependencies to wait for.
+    # We analyze them in concurrent batches (max 3 at once) to save time.
+    # Files that import others must still run sequentially in topological order
+    # so that _fetch_dependency_summaries always finds a ready "done" summary.
+
+    leaf_files = [f for f in sorted_files if not f.get("imports")]
+    dep_files  = [f for f in sorted_files if f.get("imports")]
+
+    async def _analyze_if_needed(file):
         existing = await db.node_analysis.find_one(
-            {"repo_id": repo_id, "file_path": file["path"]},
-            {"status": 1}
+            {"repo_id": repo_id, "file_path": file["path"]}, {"status": 1}
         )
         if existing and existing.get("status") == "done":
-            # Ensure files collection is also synced in case it drifted
             await db.files.update_one(
                 {"repo_id": repo_id, "path": file["path"]},
                 {"$set": {"analysis_status": "done"}}
             )
-            continue
-
+            return
         await _analyze_single_node(repo_id, file, files)
 
-    # Synthesize all node summaries into a repo-wide understanding.
-    # analyze_repo_level sets analysis_status → "understood" on completion,
-    # which is what the SSE stream uses as the terminal signal. Do NOT set
-    # "done" here — that would close the SSE stream before synthesis finishes.
+    BATCH_SIZE = 3
+    for i in range(0, len(leaf_files), BATCH_SIZE):
+        batch = leaf_files[i:i + BATCH_SIZE]
+        await asyncio.gather(*[_analyze_if_needed(f) for f in batch])
+
+    for file in dep_files:
+        await _analyze_if_needed(file)
+
     await analyze_repo_level(repo_id)
+
 
 
 async def _analyze_single_node(repo_id: str, file: dict, all_files: list):
@@ -173,6 +176,9 @@ async def _analyze_single_node(repo_id: str, file: dict, all_files: list):
             {"$set": {"analysis_status": "done"}}
         )
 
+        # ── NEW: Populate Knowledge Graph triplets ────────────────────────────
+        await _update_knowledge_graph(repo_id, file_path, analysis)
+
     except Exception as e:
         # Write failure to both collections so the node doesn't stay stuck
         # on "analyzing" in the UI forever
@@ -184,6 +190,102 @@ async def _analyze_single_node(repo_id: str, file: dict, all_files: list):
             {"repo_id": repo_id, "path": file_path},
             {"$set": {"analysis_status": "failed"}}
         )
+
+
+async def _update_knowledge_graph(repo_id: str, file_path: str, analysis: dict):
+    """
+    Decomposes file analysis into a semantic graph of nodes and edges.
+    Stores File -> BELONGS_TO -> Category, File -> HAS_ROLE -> Role, etc.
+    """
+    db = get_db()
+    file_id = file_path # Unique ID for file nodes is their path
+
+    # 1. Upsert File Node
+    await db.kg_nodes.update_one(
+        {"repo_id": repo_id, "id": file_id},
+        {"$set": {
+            "type": "file",
+            "label": file_path.split("/")[-1],
+            "properties": {
+                "purpose": analysis.get("purpose", ""),
+                "summary": analysis.get("summary_for_dependents", ""),
+                "status": "analyzed"
+            }
+        }},
+        upsert=True
+    )
+
+    # 2. Extract and Upsert Categories
+    categories = analysis.get("functional_categories", [])
+    for cat_name in categories:
+        cat_id = f"cat__{cat_name.lower().replace(' ', '_')}"
+        await db.kg_nodes.update_one(
+            {"repo_id": repo_id, "id": cat_id},
+            {"$set": {
+                "type": "category",
+                "label": cat_name,
+                "properties": {"source": "llm_analysis"}
+            }},
+            upsert=True
+        )
+        # Create Edge
+        await db.kg_edges.update_one(
+            {"repo_id": repo_id, "source": file_id, "target": cat_id, "relation": "belongs_to"},
+            {"$set": {"weight": 1.0}},
+            upsert=True
+        )
+
+    # 3. Extract and Upsert Architectural Role
+    role_name = analysis.get("architectural_role", "unknown")
+    if role_name != "unknown":
+        role_id = f"role__{role_name.lower()}"
+        await db.kg_nodes.update_one(
+            {"repo_id": repo_id, "id": role_id},
+            {"$set": {
+                "type": "role",
+                "label": role_name.replace("_", " ").title(),
+                "properties": {"source": "llm_analysis"}
+            }},
+            upsert=True
+        )
+        # Create Edge
+        await db.kg_edges.update_one(
+            {"repo_id": repo_id, "source": file_id, "target": role_id, "relation": "has_role"},
+            {"$set": {"weight": 1.0}},
+            upsert=True
+        )
+
+    # 4. Extract and Upsert Key Patterns
+    patterns = analysis.get("key_patterns", [])
+    for pat_name in patterns:
+        pat_id = f"pat__{pat_name.lower().replace(' ', '_')}"
+        await db.kg_nodes.update_one(
+            {"repo_id": repo_id, "id": pat_id},
+            {"$set": {
+                "type": "pattern",
+                "label": pat_name,
+                "properties": {"source": "llm_analysis"}
+            }},
+            upsert=True
+        )
+        # Create Edge
+        await db.kg_edges.update_one(
+            {"repo_id": repo_id, "source": file_id, "target": pat_id, "relation": "implements"},
+            {"$set": {"weight": 1.0}},
+            upsert=True
+        )
+
+    # 5. Connect structural imports (already present in 'files' but mirroring here for KG completeness)
+    # This is handled during ingestion in build_dependency_graph, but we can sync it here
+    # to ensure the KG is a complete source of truth for both structural and semantic edges.
+    file_doc = await db.files.find_one({"repo_id": repo_id, "path": file_path}, {"imports": 1})
+    if file_doc and "imports" in file_doc:
+        for imp_path in file_doc["imports"]:
+            await db.kg_edges.update_one(
+                {"repo_id": repo_id, "source": file_id, "target": imp_path, "relation": "imports"},
+                {"$set": {"weight": 1.0}},
+                upsert=True
+            )
 
 
 async def _fetch_dependency_summaries(repo_id: str, file_paths: list) -> str:

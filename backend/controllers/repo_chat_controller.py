@@ -217,6 +217,56 @@ async def repo_chat(repo_id: str, query: str, history: list[dict]) -> dict:
     reply = await chat_with_repo(cached["understanding"], query, history)
     return {"reply": reply}
 
+
+async def repo_chat_stream(repo_id: str, query: str, history: list[dict]):
+    """
+    Async generator version of repo_chat — yields tokens as they arrive.
+    History is saved after the stream completes.
+    """
+    from services.repo_chat_service import stream_chat_with_repo
+
+    db = get_db()
+
+    # Follow the same 3-layer context lookup as repo_chat
+    from services.query_router_service import execute_router_search
+    strategy, filtered_context = await execute_router_search(repo_id, query)
+
+    if strategy:
+        full_reply = []
+        async for token in stream_chat_with_repo(filtered_context, query, history):
+            full_reply.append(token)
+            yield token
+        # Persist history
+        history_to_save = list(history) + [
+            {"role": "user", "content": query},
+            {"role": "assistant", "content": "".join(full_reply)},
+        ]
+        await save_chat_history(repo_id, history_to_save)
+        return
+
+    pre_analyzed = await get_pre_analyzed_repo_context(repo_id)
+    context = pre_analyzed
+
+    if not context:
+        cached = await db.repo_understandings.find_one(
+            {"repo_id": repo_id}, {"_id": 0, "understanding": 1}
+        )
+        if not cached:
+            yield "[Error: No context found for this repository. Import and analyze it first.]"
+            return
+        context = cached["understanding"]
+
+    full_reply = []
+    async for token in stream_chat_with_repo(context, query, history):
+        full_reply.append(token)
+        yield token
+
+    history_to_save = list(history) + [
+        {"role": "user", "content": query},
+        {"role": "assistant", "content": "".join(full_reply)},
+    ]
+    await save_chat_history(repo_id, history_to_save)
+
 async def invalidate_repo_cache(repo_id: str) -> None:
     db = get_db()
     await db.repo_understandings.delete_one({"repo_id": repo_id})

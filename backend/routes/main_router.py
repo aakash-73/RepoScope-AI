@@ -1,5 +1,7 @@
+import json
 import logging
 from fastapi import APIRouter, HTTPException, Response, status, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import List, Optional
 
@@ -130,9 +132,9 @@ async def sync_repo(repo_id: str):
 
 
 @router.get("/graph/{repo_id}", response_model=GraphResponse)
-async def get_repo_graph(repo_id: str):
+async def get_repo_graph(repo_id: str, view_type: str = Query("structure")):
     try:
-        return await get_graph(repo_id)
+        return await get_graph(repo_id, view_type)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
@@ -267,3 +269,64 @@ async def patch_language_color(
         raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ─── Streaming Chat ─────────────────────────────────────────────────────────
+
+@router.post("/repo/{repo_id}/chat/stream")
+async def repo_level_chat_stream(repo_id: str, req: RepoChatRequest):
+    """Streaming SSE endpoint for repo-level chat."""
+    from controllers.repo_chat_controller import repo_chat_stream
+
+    async def event_generator():
+        try:
+            async for token in repo_chat_stream(repo_id, req.query, [m.model_dump() for m in req.history]):
+                yield f"data: {json.dumps({'token': token})}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+        finally:
+            yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+# ─── File Content ───────────────────────────────────────────────────────────
+
+@router.get("/repo/{repo_id}/file/content")
+async def get_file_content(repo_id: str, file_path: str = Query(...)):
+    from database import get_db
+    db = get_db()
+    doc = await db.files.find_one(
+        {"repo_id": repo_id, "path": file_path},
+        {"_id": 0, "path": 1, "content": 1, "language": 1}
+    )
+    if not doc:
+        raise HTTPException(status_code=404, detail="File not found")
+    return doc
+
+
+# ─── Auto-sync Settings ──────────────────────────────────────────────────────
+
+class SyncSettingsRequest(BaseModel):
+    auto_sync: bool
+    sync_interval_minutes: int = 30
+
+
+@router.patch("/repos/{repo_id}/sync-settings")
+async def patch_sync_settings(repo_id: str, body: SyncSettingsRequest):
+    from database import get_db
+    db = get_db()
+    result = await db.repositories.update_one(
+        {"repo_id": repo_id},
+        {"$set": {
+            "auto_sync": body.auto_sync,
+            "sync_interval_minutes": body.sync_interval_minutes,
+        }}
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Repository not found")
+    return {"ok": True, "auto_sync": body.auto_sync, "sync_interval_minutes": body.sync_interval_minutes}

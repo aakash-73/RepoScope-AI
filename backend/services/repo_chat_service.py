@@ -75,11 +75,11 @@ def build_repo_context(files: list[dict], file_explanations: Optional[dict[str, 
 
         if file_explanations and path in file_explanations:
             lines.append(f"\n**Analysis:**\n{file_explanations[path]}")
-        else:
-            preview = f.get("content", "")[:settings.FILE_PREVIEW_CHARS].strip()
-            if preview:
-                lang = f.get("language", "")
-                lines.append(f"``` {lang}\n{preview}\n```")
+        
+        preview = f.get("content", "")[:settings.FILE_PREVIEW_CHARS].strip()
+        if preview:
+            lang = f.get("language", "")
+            lines.append(f"\n**Code Preview:**\n``` {lang}\n{preview}\n```")
 
         lines.append("-" * 40)
 
@@ -107,15 +107,17 @@ This document will be used as the sole knowledge base for answering user questio
 """
 
 CHAT_SYSTEM_PROMPT = """\
-You are a helpful engineering assistant. You have been given a detailed \
-Repository Understanding Document produced by a senior software architect.
+You are a helpful engineering assistant for a code intelligence tool. \
+You have been given a detailed Repository Understanding Document along with \
+granular per-file analyses produced by automated AI analysis of the codebase.
 
 Rules:
-- Answer questions using ONLY the information in the understanding document.
+- Use ALL the provided context — the high-level understanding AND the per-file analyses.
+- Prioritize facts from per-file analysis (purpose, architectural_role, key_patterns, functional_categories) over general summaries when answering specific questions.
+- When asked about the tech stack, frameworks, or libraries: scan the key_patterns and language fields across all analyzed files and produce an accurate, complete answer.
 - Reference specific file paths when relevant (e.g. `services/github_service.py`).
-- If the answer cannot be determined from the document, say so honestly.
+- If the answer truly cannot be found in the context, say so — do NOT fabricate.
 - Keep answers concise and developer-friendly. Use markdown.
-- Never fabricate file names, function names, or behaviors not mentioned in the document.
 """
 
 
@@ -194,7 +196,7 @@ async def summarize_repo(
                 },
             ],
             temperature=0.3,
-            max_tokens=600,
+            max_tokens=1000,
         )
         summary = _strip_thinking(response.choices[0].message.content or "Could not generate summary.")
 
@@ -235,7 +237,7 @@ async def chat_with_repo(
                 {"role": "user", "content": user_query},
             ],
             temperature=0.3,
-            max_tokens=600,
+            max_tokens=1000,
         )
         return _strip_thinking(response.choices[0].message.content or "No response.")
 
@@ -246,31 +248,149 @@ async def chat_with_repo(
             f"Cannot connect to Ollama at {settings.OLLAMA_BASE_URL}. "
             f"Is Ollama running? Try: ollama serve\nDetails: {e}"
         )
-    except openai.APIStatusError as e:
-        raise ValueError(f"Ollama API error {e.status_code}: {e.message}")
+
+
+async def stream_chat_with_repo(
+    understanding: str,
+    user_query: str,
+    history: list[dict],
+):
+    """
+    Async generator that yields raw token strings one at a time.
+    Strips <think> blocks incrementally.
+    """
+    client = get_chat_client()
+
+    system = (
+        CHAT_SYSTEM_PROMPT
+        + "\n\n---\nREPOSITORY UNDERSTANDING DOCUMENT:\n"
+        + understanding
+    )
+
+    in_think = False
+    think_buf = ""
+
+    try:
+        stream = await client.chat.completions.create(
+            model=settings.OLLAMA_CHAT_MODEL,
+            messages=[
+                {"role": "system", "content": system},
+                *history,
+                {"role": "user", "content": user_query},
+            ],
+            temperature=0.3,
+            max_tokens=1000,
+            stream=True,
+        )
+        async for chunk in stream:
+            token = chunk.choices[0].delta.content or ""
+            if not token:
+                continue
+
+            # Strip <think>...</think> blocks on-the-fly
+            if not in_think:
+                if "<think>" in token:
+                    parts = token.split("<think>", 1)
+                    if parts[0]:
+                        yield parts[0]
+                    in_think = True
+                    think_buf = parts[1] if len(parts) > 1 else ""
+                    # Check if the block closes in same token
+                    if "</think>" in think_buf:
+                        after = think_buf.split("</think>", 1)[1]
+                        in_think = False
+                        think_buf = ""
+                        if after:
+                            yield after
+                else:
+                    yield token
+            else:
+                think_buf += token
+                if "</think>" in think_buf:
+                    after = think_buf.split("</think>", 1)[1]
+                    in_think = False
+                    think_buf = ""
+                    if after:
+                        yield after
+
+    except openai.APIConnectionError as e:
+        yield f"\n\n[Error: Cannot connect to Ollama. Is it running?]"
     except Exception as e:
-        raise ValueError(f"Unexpected chat error: {e}")
+        yield f"\n\n[Error: {e}]"
+
 
 
 # ─── Pre-analysis context fetchers (unchanged from original) ──────────────────
 
 async def get_pre_analyzed_repo_context(repo_id: str) -> Optional[str]:
-    """Fetches the synthesized repository-level understanding from pre-analysis."""
+    """Fetches synthesized repo-level understanding + all granular per-file analyses."""
     db = get_db()
     doc = await db.repo_analysis.find_one({"repo_id": repo_id, "status": "done"})
-    if not doc:
+
+    # Always try to build a rich context from per-file analyses even if top-level doc is missing
+    node_cursor = db.node_analysis.find(
+        {"repo_id": repo_id, "status": "done"},
+        {"_id": 0, "file_path": 1, "analysis": 1}
+    )
+    node_docs = await node_cursor.to_list(length=None)
+
+    # If we have neither, return None
+    if not doc and not node_docs:
         return None
 
-    context = [
-        f"OVERALL SUMMARY:\n{doc.get('overall_summary', '')}\n",
-        f"ARCHITECTURE PATTERNS: {', '.join(doc.get('architectural_patterns', []))}\n",
-        f"DATA FLOW:\n{doc.get('data_flow', '')}\n",
-        "LAYER SUMMARIES:",
-        f"- Frontend: {doc.get('layer_summaries', {}).get('frontend', 'N/A')}",
-        f"- Backend: {doc.get('layer_summaries', {}).get('backend', 'N/A')}",
-        f"- Database: {doc.get('layer_summaries', {}).get('database', 'N/A')}",
-        f"- DevOps: {doc.get('layer_summaries', {}).get('devops', 'N/A')}",
-    ]
+    # Sort by richness (files with more analysis content first), cap to avoid LLM token overflow
+    node_docs.sort(key=lambda d: len(str(d.get("analysis") or {})), reverse=True)
+    node_docs = node_docs[:60]  # Top 60 most detailed analyses
+
+    context = []
+
+    # High-level summary section (if available)
+    if doc:
+        context += [
+            "## HIGH-LEVEL REPOSITORY SUMMARY",
+            f"{doc.get('overall_summary', '')}",
+            "",
+            f"**Architecture Patterns:** {', '.join(doc.get('architectural_patterns', []) or ['N/A'])}",
+            f"**Data Flow:** {doc.get('data_flow', 'N/A')}",
+            "",
+            "**Layer Summaries:**",
+            f"- Frontend: {doc.get('layer_summaries', {}).get('frontend', 'N/A')}",
+            f"- Backend: {doc.get('layer_summaries', {}).get('backend', 'N/A')}",
+            f"- Database: {doc.get('layer_summaries', {}).get('database', 'N/A')}",
+            f"- DevOps: {doc.get('layer_summaries', {}).get('devops', 'N/A')}",
+            "",
+        ]
+
+    # Rich per-file granular analysis section
+    if node_docs:
+        context.append("## PER-FILE ANALYSIS (granular AI analysis of every file)")
+        context.append("")
+        for ndoc in node_docs:
+            path = ndoc.get("file_path", "unknown")
+            a = ndoc.get("analysis") or {}
+            purpose = a.get("purpose", "").strip()
+            role = a.get("architectural_role", "")
+            patterns = ", ".join(a.get("key_patterns", []))
+            categories = ", ".join(a.get("functional_categories", []))
+            concerns = "; ".join(a.get("concerns", []))
+            summary = a.get("summary_for_dependents", "")
+
+            lines = [f"### `{path}`"]
+            if role:
+                lines.append(f"**Role:** {role}")
+            if categories:
+                lines.append(f"**Functional Areas:** {categories}")
+            if patterns:
+                lines.append(f"**Tech/Patterns:** {patterns}")
+            if purpose:
+                lines.append(f"**Purpose:** {purpose}")
+            if summary:
+                lines.append(f"**One-liner:** {summary}")
+            if concerns:
+                lines.append(f"**Concerns:** {concerns}")
+            lines.append("")
+            context.extend(lines)
+
     return "\n".join(context)
 
 

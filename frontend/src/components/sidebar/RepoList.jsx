@@ -3,9 +3,9 @@ import { motion } from "framer-motion";
 import {
   Trash2, GitBranch, FileText, ChevronRight,
   Loader2, AlertTriangle, CheckCircle, Clock, RefreshCw,
-  RefreshCcw,
+  RefreshCcw, Settings2, Zap
 } from "lucide-react";
-import { listRepos, deleteRepo, retryRepoImport, syncRepo } from "../../lib/api";
+import { listRepos, deleteRepo, retryRepoImport, syncRepo, updateSyncSettings } from "../../lib/api";
 import { formatDate } from "../../lib/utils";
 
 // ── Status badge ──────────────────────────────────────────────────────────────
@@ -108,6 +108,8 @@ export default function RepoList({
   const [retrying, setRetrying] = useState(null);
   const [syncing, setSyncing] = useState(null);
   const [syncResults, setSyncResults] = useState({});  // repoId → SyncResponse
+  const [settingsOpen, setSettingsOpen] = useState(null);
+  const [updatingSettings, setUpdatingSettings] = useState(false);
 
   useEffect(() => {
     load();
@@ -215,6 +217,28 @@ export default function RepoList({
     }
   }
 
+  async function handleUpdateSettings(e, repoId, autoSync, intervalHours) {
+    e.stopPropagation();
+    setUpdatingSettings(true);
+    try {
+      await updateSyncSettings(repoId, {
+        auto_sync: autoSync,
+        sync_interval_hours: intervalHours
+      });
+      setRepos((prev) =>
+        prev.map((r) =>
+          r.repo_id === repoId
+            ? { ...r, auto_sync: autoSync, sync_interval_hours: intervalHours }
+            : r
+        )
+      );
+    } catch {
+      alert("Failed to update sync settings.");
+    } finally {
+      setUpdatingSettings(false);
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-8">
@@ -308,21 +332,33 @@ export default function RepoList({
 
                 {/* Sync button — only for ready repos */}
                 {isReady && (
-                  <button
-                    onClick={(e) => handleSync(e, repo)}
-                    disabled={isSyncing || isDeleting}
-                    title={
-                      repo.last_synced_at
-                        ? `Last synced ${formatDate(repo.last_synced_at)}`
-                        : "Sync with GitHub"
-                    }
-                    className="p-1 rounded opacity-0 group-hover:opacity-100 text-slate-600 hover:text-moss transition-all"
-                  >
-                    {isSyncing
-                      ? <Loader2 size={12} className="animate-spin text-moss" />
-                      : <RefreshCcw size={12} />
-                    }
-                  </button>
+                  <>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSettingsOpen(settingsOpen === repo.repo_id ? null : repo.repo_id);
+                      }}
+                      title="Auto-sync settings"
+                      className={`p-1 rounded transition-all ${settingsOpen === repo.repo_id ? "opacity-100 text-moss bg-moss/10" : "opacity-0 group-hover:opacity-100 text-slate-600 hover:text-moss"}`}
+                    >
+                      <Settings2 size={12} />
+                    </button>
+                    <button
+                      onClick={(e) => handleSync(e, repo)}
+                      disabled={isSyncing || isDeleting}
+                      title={
+                        repo.last_synced_at
+                          ? `Last synced ${formatDate(repo.last_synced_at)}`
+                          : "Sync with GitHub"
+                      }
+                      className="p-1 rounded opacity-0 group-hover:opacity-100 text-slate-600 hover:text-moss transition-all"
+                    >
+                      {isSyncing
+                        ? <Loader2 size={12} className="animate-spin text-moss" />
+                        : <RefreshCcw size={12} />
+                      }
+                    </button>
+                  </>
                 )}
 
                 {/* Pending spinner */}
@@ -360,10 +396,53 @@ export default function RepoList({
                 <FileText size={9} />
                 {repo.file_count} files
               </span>
+              {repo.auto_sync && (
+                <span className="flex items-center gap-0.5 text-[9px] text-moss/70 font-mono" title={`Auto-syncing every ${repo.sync_interval_hours}h`}>
+                  <Zap size={8} className="fill-moss/40" />
+                  Auto
+                </span>
+              )}
               <span className="text-[10px] text-slate-700 ml-auto">
                 {formatDate(repo.imported_at)}
               </span>
             </div>
+
+            {/* Auto-sync Settings Panel */}
+            {settingsOpen === repo.repo_id && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: "auto" }}
+                className="mt-2 p-2.5 rounded-lg border border-white/10 bg-black/20 text-xs cursor-default"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-slate-300 font-display">Background Auto-Sync</span>
+                  <button
+                    onClick={(e) => handleUpdateSettings(e, repo.repo_id, !repo.auto_sync, repo.sync_interval_hours || 24)}
+                    disabled={updatingSettings}
+                    className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${repo.auto_sync ? 'bg-moss' : 'bg-slate-700'}`}
+                  >
+                    <span className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${repo.auto_sync ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
+                  </button>
+                </div>
+                {repo.auto_sync && (
+                  <div className="flex items-center justify-between border-t border-white/5 pt-2 mt-1">
+                    <span className="text-slate-500 text-[10px]">Interval (hours)</span>
+                    <select
+                      value={repo.sync_interval_hours || 24}
+                      onChange={(e) => handleUpdateSettings(e, repo.repo_id, true, parseInt(e.target.value))}
+                      disabled={updatingSettings}
+                      className="bg-transparent text-slate-300 text-[10px] outline-none cursor-pointer border border-white/10 rounded px-1"
+                    >
+                      <option value={1} className="bg-charcoal-300">1 hour</option>
+                      <option value={6} className="bg-charcoal-300">6 hours</option>
+                      <option value={12} className="bg-charcoal-300">12 hours</option>
+                      <option value={24} className="bg-charcoal-300">24 hours</option>
+                    </select>
+                  </div>
+                )}
+              </motion.div>
+            )}
 
             {/* Status badge row */}
             <div className="mt-1.5">

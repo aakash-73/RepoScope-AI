@@ -253,6 +253,9 @@ async def sync_repository(repo_id: str) -> SyncResponse:
         modified=len(modified_paths),
         deleted=len(deleted_paths),
         reanalyzed=len(paths_to_reanalyze),
+        added_files=sorted(added_paths),
+        modified_files=sorted(modified_paths),
+        removed_files=sorted(deleted_paths),
         message=(
             f"Sync complete — {len(added_paths)} added, "
             f"{len(modified_paths)} modified, "
@@ -261,6 +264,7 @@ async def sync_repository(repo_id: str) -> SyncResponse:
         ),
         status="synced",
     )
+
 
 
 async def _reanalyze_changed_nodes(

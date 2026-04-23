@@ -4,9 +4,9 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   X, Loader2, Cpu, GitBranch, FileCode, AlertTriangle,
   Copy, Zap, ExternalLink, GitMerge, ArrowUpRight, Ghost, Flame, TrendingUp, Layers,
-  Shield, FlaskConical
+  Shield, FlaskConical, Code2
 } from "lucide-react";
-import { explainComponent, chatComponent, fetchNodeAnalysis } from "../../lib/api";
+import { explainComponent, chatComponent, fetchNodeAnalysis, getFileContent } from "../../lib/api";
 import { getLanguageColor } from "../../lib/utils";
 
 function CodeBlock({ children }) {
@@ -34,6 +34,8 @@ export default function ComponentSidebar({ node, repoId, graphData, refreshKey, 
   const [message, setMessage] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
   const [analysis, setAnalysis] = useState(null);
+  const [sourceContent, setSourceContent] = useState(null);
+  const [sourceLoading, setSourceLoading] = useState(false);
 
   useEffect(() => {
     if (!node || !repoId) return;
@@ -193,10 +195,21 @@ export default function ComponentSidebar({ node, repoId, graphData, refreshKey, 
           {[
             { id: "analysis", label: "AI Analysis", icon: Cpu },
             { id: "impact", label: "Impact", icon: GitMerge },
+            { id: "source", label: "Source", icon: Code2 },
           ].map(({ id, label, icon: Icon }) => (
-            <button key={id} onClick={() => setTab(id)}
-              className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-display transition-colors ${tab === id ? "text-moss border-b-2 border-moss bg-moss/5" : "text-slate-500 hover:text-slate-300"
-                }`}
+            <button key={id} onClick={() => {
+              setTab(id);
+              if (id === "source" && !sourceContent && !sourceLoading) {
+                setSourceLoading(true);
+                getFileContent(repoId, node.data.file_path)
+                  .then((d) => setSourceContent(d))
+                  .catch(() => setSourceContent({ content: "[Failed to load source]", language: "" }))
+                  .finally(() => setSourceLoading(false));
+              }
+            }}
+              className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-display transition-colors ${
+                tab === id ? "text-moss border-b-2 border-moss bg-moss/5" : "text-slate-500 hover:text-slate-300"
+              }`}
             >
               <Icon size={11} />{label}
               {id === "impact" && impact.dependents.length > 0 && (
@@ -379,6 +392,35 @@ export default function ComponentSidebar({ node, repoId, graphData, refreshKey, 
                       </button>
                     ))}
                   </div>
+                )}
+              </div>
+            </div>
+          )}
+          {tab === "source" && (
+            <div className="flex flex-col h-full">
+              <div className="px-4 py-2 border-b border-white/5 flex items-center gap-2 flex-shrink-0">
+                <Code2 size={11} className="text-slate-500" />
+                <span className="text-[10px] text-slate-600 font-mono truncate flex-1">{node.data.file_path}</span>
+                {sourceContent && (
+                  <button
+                    onClick={() => navigator.clipboard.writeText(sourceContent.content || "")}
+                    className="text-[10px] text-slate-600 hover:text-slate-400 px-2 py-0.5 rounded bg-white/5 flex items-center gap-1"
+                  >
+                    <Copy size={10} />Copy
+                  </button>
+                )}
+              </div>
+              <div className="flex-1 overflow-auto">
+                {sourceLoading && (
+                  <div className="flex items-center justify-center gap-2 h-32 text-slate-500">
+                    <Loader2 size={16} className="animate-spin text-moss" />
+                    <span className="text-sm">Loading source…</span>
+                  </div>
+                )}
+                {sourceContent && !sourceLoading && (
+                  <pre className="p-4 text-[11px] font-mono text-slate-300 whitespace-pre overflow-auto leading-relaxed">
+                    <code>{sourceContent.content}</code>
+                  </pre>
                 )}
               </div>
             </div>

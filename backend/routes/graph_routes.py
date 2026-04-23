@@ -1,10 +1,10 @@
-from fastapi import APIRouter
-from services.graph_service import build_dependency_graph
+from fastapi import APIRouter, Query
+from services.graph_aggregator_service import get_dual_view_graph
 
 router = APIRouter()
 
 @router.post("/repo/{repo_id}/build-graph")
-async def generate_graph(repo_id: str):
-    graph = await build_dependency_graph(repo_id)
+async def generate_graph(repo_id: str, view_type: str = Query("structure")):
+    graph = await get_dual_view_graph(repo_id, view_type)
     return graph
 

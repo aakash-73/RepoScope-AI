@@ -39,9 +39,16 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         _log.warning("Classifier pre-warm failed (will use defaults): %s", e)
 
+    from services.auto_sync_service import start_background_polling
+    start_background_polling()
+
     yield
+
     await close_db()
     ollama_manager.stop()
+    from services.auto_sync_service import stop_background_polling
+    stop_background_polling()
+
 
 
 app = FastAPI(

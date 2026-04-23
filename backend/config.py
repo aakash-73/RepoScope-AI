@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     CORS_ORIGINS: List[str] = ["http://localhost:5173", "http://localhost:5174"]
 
     # ─── File processing limits ───────────────────────────────────────────────
-    FILE_PREVIEW_CHARS: int = 900
+    FILE_PREVIEW_CHARS: int = 1200
     MAX_CODE_CHARS: int = 12_000
     HEAD_CHARS: int = 5_500
     TAIL_CHARS: int = 5_500

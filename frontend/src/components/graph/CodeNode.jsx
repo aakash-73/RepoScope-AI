@@ -43,7 +43,59 @@ const HANDLE_STYLE = {
 };
 
 function CodeNode({ data, selected }) {
+  const isHub = data.kind && data.kind !== "file";
   const langColor = data.node_color || getLanguageColor(data.language);
+
+  if (isHub || data.isSemantic) {
+    const isSatellite = data.isSemantic && !isHub;
+    
+    // Dynamic sizing based on text length to establish hierarchy and ensure text fits
+    const charLen = data.label ? data.label.length : 10;
+    const baseSize = isHub ? Math.max(130, charLen * 8.5 + 40) : Math.max(85, charLen * 7 + 30);
+    // Cap sizes to prevent completely massive circles
+    const size = Math.min(250, baseSize);
+    
+    const color = isHub ? (data.node_color || "#3B82F6") : langColor;
+    
+    return (
+      <motion.div
+        initial={{ scale: 0, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        className={`
+          relative rounded-full flex flex-col items-center justify-center text-center
+          border-2 cursor-pointer z-10
+          ${selected ? "ring-2 ring-white/20" : ""}
+        `}
+        style={{
+          width: size,
+          height: size,
+          background: "#000000",
+          borderColor: color,
+          boxShadow: isSatellite 
+            ? `0 0 25px ${color}90, inset 0 0 15px ${color}50` 
+            : `0 0 15px ${color}40`,
+        }}
+      >
+        <div className="flex flex-col items-center justify-center pt-3 pb-2 px-2 w-full h-full text-white">
+            <span className="text-[10px] text-slate-400 font-mono tracking-wide opacity-80 overflow-hidden text-ellipsis whitespace-nowrap max-w-full">
+                {isSatellite ? (data.language || "file") : data.kind}
+            </span>
+            <p className="text-[13px] font-display font-bold leading-tight break-words max-w-full mt-1 mb-auto flex-1 flex items-center justify-center text-white">
+                {data.label}
+            </p>
+            <div className="mt-1 opacity-50 flex items-center justify-center w-full">
+                <svg width="10" height="6" viewBox="0 0 10 6" fill="none">
+                    <path d="M5 6L0 0H10L5 6Z" fill="#9CA3AF"/>
+                </svg>
+            </div>
+        </div>
+        
+        <Handle type="target" position={Position.Top} style={{ opacity: 0 }} />
+        <Handle type="source" position={Position.Bottom} style={{ opacity: 0 }} />
+      </motion.div>
+    );
+  }
+
   const isCircular = data.is_circular;
   const isDeadCode = data.is_dead_code || data.is_dead;
   const isTestFile = data.is_test_file || false;
