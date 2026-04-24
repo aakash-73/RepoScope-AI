@@ -267,6 +267,7 @@ graph TB
     end
 
     subgraph Server["Backend (FastAPI)"]
+        OM["OllamaManager"]
         Router["API Router"]
         RC["Repo Controller"]
         RCC["Repo Chat Controller"]
@@ -276,10 +277,14 @@ graph TB
             SC["Smart Classifier"]
             AN["Analyzer Service"]
             GB["Graph Builder"]
+            GA["Graph Aggregator"]
             NA["Node Analyzer"]
             GS["Groq / Ollama Service"]
             RCS["Repo Chat Service"]
+            QR["Query Router"]
+            AS["AutoSync Service"]
             SS["Sync Service"]
+            BA["Bulk Analyzer"]
         end
     end
 
@@ -294,14 +299,20 @@ graph TB
         node_analysis[("node_analysis")]
         repo_analysis[("repo_analysis")]
         chat_hist[("repo_chat_history")]
+        kg_nodes[("kg_nodes")]
+        kg_edges[("kg_edges")]
+        lang_reg[("language_registry")]
+        class_ext[("classifier_extensions")]
     end
 
+    OM -->|manages| Ollama
     UI --> Router
     Router --> RC & RCC
-    RC --> GH & SC & AN & GB & NA
-    RCC --> RCS
-    NA & GS & RCS --> Ollama & Groq
-    GH & SC & AN & GB & NA & RCS --> DB
+    RC --> GH & SC & AN & GB & NA & AS
+    RCC --> RCS & QR & GA
+    NA & GS & RCS & QR --> Ollama & Groq
+    GH & SC & AN & GB & NA & RCS & AS --> DB
+    NA --> kg_nodes & kg_edges
     Canvas --> Sidebar & Chat
 ```
 
@@ -320,7 +331,7 @@ flowchart TD
 
     G --> H["📐 Topological Sort\n(Kahn's Algorithm)\nLeaf files processed first"]
     
-    H --> I["📋 Batch Processing\n5 concurrent files\n0.5s throttle between batches"]
+    H --> I["📋 Batch Processing\nLeaves processed in parallel\n(batches of 3)\nDependencies processed sequentially"]
 
     I --> J{"For Each File"}
     J --> K["📝 Build Rich Prompt:\n• File content (≤6000 chars)\n• Dependency summaries (already analyzed)\n• Files that import this file\n• Graph metrics (depth, in/out degree)"]
@@ -329,7 +340,7 @@ flowchart TD
     
     L --> M["📊 Structured JSON Output:\n• purpose\n• exports\n• why_connected_to (each import)\n• architectural_role\n• key_patterns\n• concerns\n• summary_for_dependents"]
 
-    M --> N["💾 Save to node_analysis\ncollection in MongoDB"]
+    M --> N["💾 Save to node_analysis\ncollection in MongoDB\n+ Update kg_nodes & kg_edges"]
     
     N --> O["📡 SSE Event Broadcast\n→ Frontend updates node\nfrom ghosted → solid"]
 
@@ -365,146 +376,7 @@ flowchart TD
 
 ### Repo-Level Synthesis — How Individual Nodes Are Mapped
 
-After every file has been individually analyzed, the system runs `analyze_repo_level()` to **aggregate all node-level summaries** into a single, cohesive repository understanding. Here's exactly how individual nodes map to the repo-level document:
-
-```mermaid
-flowchart TD
-    Start["✅ All Nodes Analyzed"] --> Fetch["📥 Fetch all node_analysis docs\nwhere status = done"]
-
-    Fetch --> Loop{"For Each\nAnalyzed Node"}
-
-    Loop --> Extract["Extract from each node:\n• file_path\n• architectural_role\n• summary_for_dependents"]
-
-    Extract --> Classify{"Classify by\narchitectural_role"}
-
-    Classify -- "entry_point\ncontroller\nservice" --> Backend["🔧 Backend Layer Bucket"]
-    Classify -- "style\ncomponent" --> Frontend["🎨 Frontend Layer Bucket"]
-    Classify -- "model" --> Database["🗄️ Database Layer Bucket"]
-    Classify -- "config" --> DevOps["⚙️ DevOps Layer Bucket"]
-    Classify -- "helper\ntest\nother" --> Other["📦 Other Bucket"]
-
-    Classify -- "role = entry_point" --> EP["🚪 Entry Points List"]
-
-    Backend --> Agg
-    Frontend --> Agg
-    Database --> Agg
-    DevOps --> Agg
-    Other --> Agg
-    EP --> Agg
-
-    Agg["📋 Build Synthesis Prompt"] --> PromptDetail
-
-    subgraph PromptDetail["Synthesis Prompt Structure"]
-        direction TB
-        P1["Frontend layer:\nGraphPage.jsx: Main page managing graph state\nCodeNode.jsx: Custom node renderer with badges\nLanguageLegend.jsx: Color legend component\n..."]
-        P2["Backend layer:\nmain.py: FastAPI entry point with lifespan\nrepo_controller.py: Import and graph pipeline\ngroq_service.py: LLM calls with retry logic\n..."]
-        P3["Database layer:\ndatabase.py: MongoDB connection helpers\nrepository.py: Pydantic schemas\n..."]
-        P4["DevOps layer:\nconfig.py: Pydantic settings from env vars\nlogging.conf: Structured logging config\n..."]
-        P5["Entry points:\nmain.py, App.jsx, main.jsx"]
-    end
-
-    PromptDetail --> LLM["🧠 LLM Synthesis Call\n(Ollama qwen2.5-coder)"]
-
-    LLM --> Output["📊 Structured JSON Output"]
-
-    subgraph Output_Detail["repo_analysis Document"]
-        direction TB
-        O1["overall_summary\n2-3 paragraph description of what the repo\ndoes and how it is structured"]
-        O2["data_flow\nHow data moves from entry to storage"]
-        O3["architectural_patterns\ne.g. MVC, REST, Service Layer, Repository Pattern"]
-        O4["layer_summaries\nfrontend: paragraph summary\nbackend: paragraph summary\ndatabase: paragraph summary\ndevops: paragraph summary"]
-    end
-
-    Output --> Output_Detail
-
-    Output_Detail --> Save["💾 Save to repo_analysis\ncollection in MongoDB"]
-
-    Save --> Status["📡 Set repo status → understood\nSSE stream sends terminal signal"]
-
-    Status --> Ready["🎯 Repo Intelligence Ready\nPowers: repo chat, proactive insights,\nrepo summary endpoint"]
-
-    style Start fill:#22c55e,color:#fff
-    style Backend fill:#f97316,color:#fff
-    style Frontend fill:#6366f1,color:#fff
-    style Database fill:#14b8a6,color:#fff
-    style DevOps fill:#8b5cf6,color:#fff
-    style Other fill:#6b7280,color:#fff
-    style EP fill:#ef4444,color:#fff
-    style LLM fill:#10b981,color:#fff
-    style Ready fill:#3b82f6,color:#fff
-    style Agg fill:#f59e0b,color:#000
-```
-
-#### Concrete Example
-
-Imagine a repo with 5 analyzed files. Here's how their `summary_for_dependents` and `architectural_role` get bucketed:
-
-| File | `architectural_role` | `summary_for_dependents` | Mapped To |
-|---|---|---|---|
-| `main.py` | `entry_point` | "FastAPI app entry point with lifespan startup" | **Backend** + **Entry Points** |
-| `repo_controller.py` | `controller` | "Handles import, graph, and explain endpoints" | **Backend** |
-| `database.py` | `model` | "MongoDB connection pool and helper functions" | **Database** |
-| `GraphCanvas.jsx` | `component` | "React Flow canvas with Dagre layout engine" | **Frontend** |
-| `config.py` | `config` | "Pydantic settings loaded from environment vars" | **DevOps** |
-
-These summaries are concatenated per layer (up to 30 backend, 30 frontend, 20 database, 10 devops) and passed to the LLM as a single synthesis prompt. The LLM reads *all* summaries together and produces a cohesive narrative — not a per-file list, but a **connected story** of how the layers interact.
-
-### Why This Architecture Matters
-
-The key insight is that **node-level analysis feeds repo-level intelligence**:
-
-1. **Bottom-Up Analysis** — Leaf files (no dependencies) are analyzed first via topological sort. Each file's one-line `summary_for_dependents` is injected into the prompts of files that import it. This means by the time a high-level controller is analyzed, the LLM already knows what every service it calls actually does.
-
-2. **Pre-Built Context for Chat** — When a user asks "what does this file do?", the system doesn't re-analyze the file from scratch. It retrieves the pre-computed `node_analysis` (purpose, role, patterns, concerns) and injects it as conversation context. This makes chat **faster and more accurate** than raw file-content prompting.
-
-3. **Repo-Level Synthesis** — After all nodes are analyzed, the system aggregates every node summary into a cohesive **repo_analysis** document organized by architectural layer (frontend, backend, database, devops). This becomes the grounding context for repo-level chat, so the AI can answer questions like *"how does data flow from the frontend to the database?"* with precise, file-level detail.
-
-4. **Hive Network Router** — When chatting with the repo, the AI doesn't naively load everything. It uses an **Organic Multi-Category Index**; nodes overlap across systems based on their `dependents`. A Router classifies the user's intent to selectively pull only the EXACT architectural *Hive* (e.g., "AI Services") from the database out of the thousands of files.
-
-5. **Real-Time Materialization** — The SSE stream broadcasts each completed analysis instantly. The graph transitions from a "ghosted blueprint" to a fully "materialized" architecture as each node lights up, making the analysis process visible and engaging.
-
-### The 5-Layer Retrieval Architecture (RAG)
-
-Because prompting an LLM with thousands of files is impossible, RepoScope AI uses a state-of-the-art **Multi-Layer Query Router** to precisely filter context before initiating a chat:
-
-1. **Exact Match (`exports / imports`)**: Targeting precise function names, models, or hooks.
-2. **Fuzzy Search (`content / path`)**: Keyword text search indexed by MongoDB.
-3. **Semantic Tagging**: Querying by `architectural_role` automatically attached to nodes during materialization.
-4. **Dependency Graph Traversal (`$graphLookup`)**: Impact analysis tracing exact DAG lineage across edges.
-5. **Hive Categorization**: Matching abstract concepts ("Where is the AI logic?") to dynamic functional arrays assigned to files by analyzing their dependents.
-
-### Data Flow
-
-```
-User inputs GitHub URL
-      │
-      ▼
-github_service ─────► Download + extract ZIP (80+ extensions)
-      │
-      ▼
-smart_classifier ───► Classify each file (7-tier priority)
-      │
-      ▼
-analyzer_service ───► Parse imports/exports (language-specific parsers)
-      │
-      ▼
-MongoDB ────────────► Store files in `files` collection
-      │
-      ├──── [on demand] ──► graph_builder ──► Dependency graph → React Flow
-      │
-      └──── [background] ─► node_analyzer_service
-                                │
-                                ├── Topological sort (leaves first)
-                                ├── Per-file LLM analysis (batches of 5)
-                                ├── SSE broadcast → frontend materialization
-                                └── Repo-level synthesis
-                                        │
-                                        ▼
-                              User asks a question
-                                        │
-                                        ▼
-                              LLM answers with pre-built context
-```
+After every file has been individually analyzed, the system runs `analyze_repo_level()` to **aggregate all node-level summaries** into a single, cohesive repository understanding.
 
 ---
 
@@ -515,7 +387,7 @@ reposcope-ai/
 ├── backend/
 │   ├── main.py                        # FastAPI app entry point + lifespan startup
 │   ├── config.py                      # Pydantic settings (env vars)
-│   ├── database.py                    # MongoDB connection helpers
+│   ├── database.py                    # MongoDB connection helpers + index creation
 │   ├── requirements.txt               # Python dependencies
 │   ├── logging.conf                   # Structured logging configuration
 │   ├── .env.example                   # Environment template
@@ -530,7 +402,7 @@ reposcope-ai/
 │   │   ├── analyzer_service.py        # Multi-language import/export parser
 │   │   ├── graph_builder.py           # Dependency graph + analytics computation
 │   │   ├── graph_service.py           # Graph data access helpers
-│   │   ├── node_analyzer_service.py   # Background per-node LLM analysis pipeline
+│   │   ├── node_analyzer_service.py   # Background per-node LLM analysis pipeline + KG Population
 │   │   ├── groq_service.py            # LLM service (explain, chat, retry logic)
 │   │   ├── repo_chat_service.py       # Repo-level understanding + streaming chat
 │   │   ├── query_router_service.py    # Hive Network Router mapping queries to concepts
@@ -540,12 +412,15 @@ reposcope-ai/
 │   │   ├── language_registry.py       # Language color registry (MongoDB)
 │   │   ├── llm_import_extractor.py    # Fallback LLM-based import extraction
 │   │   ├── bulk_analyzer_service.py   # Batch analysis trigger
-│   │   └── ollama_manager.py          # Ollama health checks & model management
+│   │   └── ollama_manager.py          # Ollama server lifecycle management
 │   ├── routes/
 │   │   ├── main_router.py             # All API route definitions
-│   │   └── analysis_routes.py         # Analysis status + SSE stream sub-router
+│   │   ├── analysis_routes.py         # Analysis status + SSE stream sub-router
+│   │   ├── graph_routes.py            # Graph generation routes
+│   │   └── repo_routes.py             # Repo actions
 │   ├── models/
-│   │   └── repository.py              # Pydantic request/response schemas
+│   │   ├── repository.py              # Pydantic request/response schemas
+│   │   └── repo_model.py              # Internal data models
 │   └── tests/
 │       ├── conftest.py                # Test fixtures
 │       ├── test_api.py                # API endpoint tests
@@ -573,19 +448,22 @@ reposcope-ai/
 │       │   │   └── Graphexportdialog.jsx # Export modal (PNG/SVG/JSON/Mermaid)
 │       │   ├── sidebar/
 │       │   │   ├── ComponentSidebar.jsx # Node detail: analysis, impact, source preview
-│       │   │   └── RepoList.jsx       # Left sidebar: repo list, progress, auto-sync settings
+│       │   │   └── RepoList.jsx       # Left sidebar: repo list, progress, auto-sync
 │       │   ├── chat/
 │       │   │   └── Repochatpanel.jsx  # Floating repo-level streaming Q&A chat panel
 │       │   └── ui/
-│       │       └── ImportDialog.jsx   # Repo import modal
+│       │       ├── ImportDialog.jsx   # Repo import modal
+│       │       ├── SyncDiffPanel.jsx  # Shows added/modified/removed after sync
+│       │       └── ErrorBoundary.jsx  # Error boundaries for crash recovery
 │       └── lib/
 │           ├── api.js                 # All API calls (axios)
+│           ├── cache.js               # Frontend data cache
 │           ├── force-layout.js        # D3-Force layout engine for Semantic View
 │           ├── graph-layout.js        # Dagre tree layout engine for Structure View
 │           ├── useKeyboardShortcuts.js# Global keyboard bindings hook
+│           ├── Usegraphexport.js      # Custom hook for exports
 │           └── utils.js               # Common utilities and formatters
 │
-├── screenshots/                       # Feature screenshots for documentation
 ├── ecosystem.config.cjs               # PM2 process manager configuration
 ├── DEPLOYMENT.md                      # Detailed deployment guide
 └── .gitignore
@@ -620,8 +498,6 @@ cp backend/.env.example backend/.env
 
 Base URL: `http://localhost:8000`
 
-Interactive Swagger docs: `http://localhost:8000/docs`
-
 ### Repository Management
 
 | Method | Endpoint | Description |
@@ -631,18 +507,22 @@ Interactive Swagger docs: `http://localhost:8000/docs`
 | `DELETE` | `/api/v1/repos/{id}` | Delete a repository and all its data |
 | `POST` | `/api/v1/repos/{id}/retry` | Retry a failed import |
 | `POST` | `/api/v1/repos/{id}/sync` | Incrementally sync with GitHub |
-| `PATCH` | `/api/v1/repos/{id}/sync-settings`| Configure background auto-sync intervals |
+| `PATCH` | `/api/v1/repos/{id}/sync-settings` | Configure background auto-sync |
 
 ### Graph & Analysis
 
 | Method | Endpoint | Description |
 |---|---|---|
 | `GET` | `/api/v1/graph/{id}` | Get dependency graph (nodes + edges + cycles) |
+| `POST` | `/api/v1/repo/{repo_id}/build-graph` | Build Graph for specific view type |
 | `POST` | `/api/v1/explain` | Get AI explanation for a file (cached) |
 | `POST` | `/api/v1/analysis/{id}/reanalyze` | Force full re-analysis |
 | `POST` | `/api/v1/analysis/{id}/node/reanalyze` | Re-analyze a single node |
 | `GET` | `/api/v1/analysis/{id}/status` | Get analysis progress |
-| `GET` | `/api/v1/analysis/{id}/stream` | SSE stream for real-time progress |
+| `GET` | `/api/v1/analysis/{id}/stream` | SSE stream: `snapshot`, `node_update`, `progress`, `done` |
+| `GET` | `/api/v1/analysis/{id}/repo` | Get completed repo-level synthesis document |
+| `GET` | `/api/v1/analysis/{id}/node?file_path=` | Get completed node analysis document |
+| `GET` | `/api/v1/health` | Health check |
 
 ### AI Chat & Content
 
@@ -650,12 +530,12 @@ Interactive Swagger docs: `http://localhost:8000/docs`
 |---|---|---|
 | `POST` | `/api/v1/component/chat` | Chat about a specific file |
 | `GET` | `/api/v1/repo/{id}/summary` | Get/generate repo-level AI summary |
-| `POST` | `/api/v1/repo/{id}/chat` | Chat about the entire repository |
-| `POST` | `/api/v1/repo/{id}/chat/stream` | Token-by-token streaming chat for the repo |
+| `POST` | `/api/v1/repo/{id}/chat` | Chat about the entire repository (non-streaming) |
+| `POST` | `/api/v1/repo/{id}/chat/stream` | Token-by-token SSE streaming chat |
 | `GET` | `/api/v1/repo/{id}/chat/history` | Fetch chat history |
 | `DELETE` | `/api/v1/repo/{id}/chat/history` | Clear chat history |
 | `GET` | `/api/v1/repo/{id}/insights` | Get proactive AI insights |
-| `GET` | `/api/v1/repo/{id}/file/content` | Fetch raw syntax-highlighted source code |
+| `GET` | `/api/v1/repo/{id}/file/content?file_path=` | Fetch raw source code for a file |
 
 ### Languages
 

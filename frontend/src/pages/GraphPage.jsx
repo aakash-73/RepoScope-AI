@@ -222,9 +222,9 @@ export default function GraphPage() {
         setGraphData(data);
         setGraphKey((k) => k + 1);
       } catch (err) {
-          setGraphError("Failed to switch view.");
+        setGraphError("Failed to switch view.");
       } finally {
-          setGraphLoading(false);
+        setGraphLoading(false);
       }
     };
     refetch();
@@ -453,8 +453,8 @@ export default function GraphPage() {
                   }`}
               >
                 <div className="relative">
-                    <Network size={12} className={viewType === "semantic" ? "text-blue-400" : ""} />
-                    {viewType === "semantic" && <div className="absolute -top-1 -right-1 w-2 h-2 bg-blue-400 rounded-full animate-pulse" />}
+                  <Network size={12} className={viewType === "semantic" ? "text-blue-400" : ""} />
+                  {viewType === "semantic" && <div className="absolute -top-1 -right-1 w-2 h-2 bg-blue-400 rounded-full animate-pulse" />}
                 </div>
                 {viewType === "semantic" ? "Semantic View" : "Structure View"}
               </button>
