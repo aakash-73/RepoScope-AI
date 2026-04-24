@@ -376,7 +376,150 @@ flowchart TD
 
 ### Repo-Level Synthesis — How Individual Nodes Are Mapped
 
-After every file has been individually analyzed, the system runs `analyze_repo_level()` to **aggregate all node-level summaries** into a single, cohesive repository understanding.
+After every file has been individually analyzed, the system runs `analyze_repo_level()` to **aggregate all node-level summaries** into a single, cohesive repository understanding. Here's exactly how individual nodes map to the repo-level document:
+
+```mermaid
+flowchart TD
+    Start["✅ All Nodes Analyzed"] --> Fetch["📥 Fetch all node_analysis docs\nwhere status = done"]
+
+    Fetch --> Loop{"For Each\nAnalyzed Node"}
+
+    Loop --> Extract["Extract from each node:\n• file_path\n• architectural_role\n• summary_for_dependents"]
+
+    Extract --> Classify{"Classify by\narchitectural_role"}
+
+    Classify -- "entry_point\ncontroller\nservice" --> Backend["🔧 Backend Layer Bucket"]
+    Classify -- "style\ncomponent" --> Frontend["🎨 Frontend Layer Bucket"]
+    Classify -- "model" --> Database["🗄️ Database Layer Bucket"]
+    Classify -- "config" --> DevOps["⚙️ DevOps Layer Bucket"]
+    Classify -- "helper\ntest\nother" --> Other["📦 Other Bucket"]
+
+    Classify -- "role = entry_point" --> EP["🚪 Entry Points List"]
+
+    Backend --> Agg
+    Frontend --> Agg
+    Database --> Agg
+    DevOps --> Agg
+    Other --> Agg
+    EP --> Agg
+
+    Agg["📋 Build Synthesis Prompt"] --> PromptDetail
+
+    subgraph PromptDetail["Synthesis Prompt Structure"]
+        direction TB
+        P1["Frontend layer:\nGraphPage.jsx: Main page managing graph state\nCodeNode.jsx: Custom node renderer with badges\nLanguageLegend.jsx: Color legend component\n..."]
+        P2["Backend layer:\nmain.py: FastAPI entry point with lifespan\nrepo_controller.py: Import and graph pipeline\ngroq_service.py: LLM calls with retry logic\n..."]
+        P3["Database layer:\ndatabase.py: MongoDB connection helpers\nrepository.py: Pydantic schemas\n..."]
+        P4["DevOps layer:\nconfig.py: Pydantic settings from env vars\nlogging.conf: Structured logging config\n..."]
+        P5["Entry points:\nmain.py, App.jsx, main.jsx"]
+    end
+
+    PromptDetail --> LLM["🧠 LLM Synthesis Call\n(Ollama qwen2.5-coder)"]
+
+    LLM --> Output["📊 Structured JSON Output"]
+
+    subgraph Output_Detail["repo_analysis Document"]
+        direction TB
+        O1["overall_summary\n2-3 paragraph description of what the repo\ndoes and how it is structured"]
+        O2["data_flow\nHow data moves from entry to storage"]
+        O3["architectural_patterns\ne.g. MVC, REST, Service Layer, Repository Pattern"]
+        O4["layer_summaries\nfrontend: paragraph summary\nbackend: paragraph summary\ndatabase: paragraph summary\ndevops: paragraph summary"]
+    end
+
+    Output --> Output_Detail
+
+    Output_Detail --> Save["💾 Save to repo_analysis\ncollection in MongoDB"]
+
+    Save --> Status["📡 Set repo status → understood\nSSE stream sends terminal signal"]
+
+    Status --> Ready["🎯 Repo Intelligence Ready\nPowers: repo chat, proactive insights,\nrepo summary endpoint"]
+
+    style Start fill:#22c55e,color:#fff
+    style Backend fill:#f97316,color:#fff
+    style Frontend fill:#6366f1,color:#fff
+    style Database fill:#14b8a6,color:#fff
+    style DevOps fill:#8b5cf6,color:#fff
+    style Other fill:#6b7280,color:#fff
+    style EP fill:#ef4444,color:#fff
+    style LLM fill:#10b981,color:#fff
+    style Ready fill:#3b82f6,color:#fff
+    style Agg fill:#f59e0b,color:#000
+```
+
+#### Concrete Example
+
+Imagine a repo with 5 analyzed files. Here's how their `summary_for_dependents` and `architectural_role` get bucketed:
+
+| File | `architectural_role` | `summary_for_dependents` | Mapped To |
+|---|---|---|---|
+| `main.py` | `entry_point` | "FastAPI app entry point with lifespan startup" | **Backend** + **Entry Points** |
+| `repo_controller.py` | `controller` | "Handles import, graph, and explain endpoints" | **Backend** |
+| `database.py` | `model` | "MongoDB connection pool and helper functions" | **Database** |
+| `GraphCanvas.jsx` | `component` | "React Flow canvas with Dagre layout engine" | **Frontend** |
+| `config.py` | `config` | "Pydantic settings loaded from environment vars" | **DevOps** |
+
+These summaries are concatenated per layer (up to 30 backend, 30 frontend, 20 database, 10 devops) and passed to the LLM as a single synthesis prompt. The LLM reads *all* summaries together and produces a cohesive narrative — not a per-file list, but a **connected story** of how the layers interact.
+
+### Why This Architecture Matters
+
+The key insight is that **node-level analysis feeds repo-level intelligence**:
+
+1. **Bottom-Up Analysis** — Leaf files (no dependencies) are analyzed first via topological sort. Leaves are processed in **concurrent batches of 3**; files with dependencies are processed **sequentially** so that every dependency's `summary_for_dependents` is already stored before the importer runs.
+
+2. **Knowledge Graph Triplets** — After each node is analyzed, `node_analyzer_service` writes semantic triplets into two new MongoDB collections: `kg_nodes` (File, Category, Role, Pattern nodes) and `kg_edges` (`belongs_to`, `has_role`, `implements`, `imports` relations). This powers the **Semantic View** in the graph canvas and enables Hive Search.
+
+3. **Pre-Built Context for Chat** — When a user asks "what does this file do?", the system retrieves the pre-computed `node_analysis` (purpose, role, patterns, concerns) and injects it as conversation context. This makes chat **faster and more accurate** than raw file-content prompting.
+
+4. **Repo-Level Synthesis** — After all nodes are analyzed, the system aggregates every node summary into a cohesive **repo_analysis** document organized by architectural layer (frontend, backend, database, devops). This becomes the grounding context for repo-level chat.
+
+5. **Hive Network Router** — A 5-strategy intent classifier (`exact_match`, `fuzzy_search`, `semantic`, `graph`, `hive_search`) routes each chat query to the minimal set of files needed. `hive_search` uses `kg_nodes`/`kg_edges` to match abstract concepts like "AI Services" to exactly the files belonging to that functional category.
+
+6. **Real-Time Materialization** — The SSE stream (4 event types: `snapshot`, `node_update`, `progress`, `done`) broadcasts each completed analysis instantly. The graph transitions from a "ghosted blueprint" to a fully "materialized" architecture as each node lights up.
+
+7. **Auto-Sync** — `auto_sync_service` runs a background asyncio task that polls MongoDB every 60 seconds for repos with `auto_sync=true` and triggers `sync_service` when `sync_interval_minutes` has elapsed since `last_synced_at`.
+
+### The 5-Layer Retrieval Architecture (RAG)
+
+Because prompting an LLM with thousands of files is impossible, RepoScope AI uses a state-of-the-art **Multi-Layer Query Router** to precisely filter context before initiating a chat:
+
+1. **Exact Match (`exports / imports`)**: Targeting precise function names, models, or hooks.
+2. **Fuzzy Search (`content / path`)**: Keyword text search indexed by MongoDB.
+3. **Semantic Tagging**: Querying by `architectural_role` automatically attached to nodes during materialization.
+4. **Dependency Graph Traversal (`$graphLookup`)**: Impact analysis tracing exact DAG lineage across edges.
+5. **Hive Categorization**: Matching abstract concepts ("Where is the AI logic?") to dynamic functional arrays assigned to files by analyzing their dependents.
+
+### Data Flow
+
+```
+User inputs GitHub URL
+      │
+      ▼
+github_service ─────► Download + extract ZIP (80+ extensions)
+      │
+      ▼
+smart_classifier ───► Classify each file (7-tier priority)
+      │
+      ▼
+analyzer_service ───► Parse imports/exports (language-specific parsers)
+      │
+      ▼
+MongoDB ────────────► Store files in `files` collection
+      │
+      ├──── [on demand] ──► graph_builder ──► Dependency graph → React Flow
+      │
+      └──── [background] ─► node_analyzer_service
+                                │
+                                ├── Topological sort (leaves first)
+                                ├── Per-file LLM analysis (parallel leaves batches of 3, sequential dependents)
+                                ├── SSE broadcast → frontend materialization
+                                └── Repo-level synthesis
+                                        │
+                                        ▼
+                              User asks a question
+                                        │
+                                        ▼
+                              LLM answers with pre-built context
+```
 
 ---
 
