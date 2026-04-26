@@ -9,11 +9,7 @@ from database import connect_db, close_db
 from routes.main_router import router
 from services import ollama_manager
 
-# Ensure logging.conf exists in backend root or adjust path
-logging.config.fileConfig("logging.conf", disable_existing_loggers=False)
-
 _log = logging.getLogger(__name__)
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -76,5 +72,4 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=8000,
         reload=True,
-        log_config="logging.conf",
     )
