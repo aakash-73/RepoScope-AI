@@ -55,9 +55,6 @@ export default function ImportDialog({ onClose, onSuccess }) {
                 <h2 className="font-display font-semibold text-slate-200">
                   Import Repository
                 </h2>
-                <p className="text-xs text-slate-500">
-                  Ingest a GitHub repo for analysis
-                </p>
               </div>
             </div>
             <button
