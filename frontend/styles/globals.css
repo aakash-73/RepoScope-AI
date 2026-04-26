@@ -16,7 +16,7 @@
   }
 
   body {
-    background-color: #121212;
+    background-color: #b72626;
     color: #e5e7eb;
     font-family: "DM Sans", sans-serif;
     -webkit-font-smoothing: antialiased;
@@ -27,19 +27,23 @@
     width: 6px;
     height: 6px;
   }
+
   ::-webkit-scrollbar-track {
     background: #1e1e1e;
   }
+
   ::-webkit-scrollbar-thumb {
     background: #374151;
     border-radius: 3px;
   }
+
   ::-webkit-scrollbar-thumb:hover {
     background: #B6FF3B;
   }
 }
 
 @layer components {
+
   /* Glass panel */
   .glass {
     @apply bg-charcoal-100/70 backdrop-blur-md border border-white/5 rounded-xl;
@@ -52,20 +56,16 @@
 
   /* Neon Moss button */
   .btn-moss {
-    @apply bg-moss text-charcoal-300 font-display font-semibold px-5 py-2.5 rounded-lg
-           transition-all duration-200 hover:bg-moss-dim active:scale-95;
+    @apply bg-moss text-charcoal-300 font-display font-semibold px-5 py-2.5 rounded-lg transition-all duration-200 hover:bg-moss-dim active:scale-95;
   }
 
   .btn-ghost {
-    @apply bg-transparent text-slate-400 border border-white/10 font-display px-4 py-2 rounded-lg
-           hover:border-moss/50 hover:text-moss transition-all duration-200;
+    @apply bg-transparent text-slate-400 border border-white/10 font-display px-4 py-2 rounded-lg hover:border-moss/50 hover:text-moss transition-all duration-200;
   }
 
   /* Input */
   .input-field {
-    @apply w-full bg-charcoal-50 border border-white/10 rounded-lg px-4 py-2.5
-           text-sm text-slate-400 placeholder-slate-600 outline-none
-           focus:border-moss/60 focus:ring-1 focus:ring-moss/30 transition-all;
+    @apply w-full bg-charcoal-50 border border-white/10 rounded-lg px-4 py-2.5 text-sm text-slate-400 placeholder-slate-600 outline-none focus:border-moss/60 focus:ring-1 focus:ring-moss/30 transition-all;
   }
 
   /* Badge */
@@ -182,6 +182,13 @@
 }
 
 @keyframes blink {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0; }
+
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0;
+  }
 }
