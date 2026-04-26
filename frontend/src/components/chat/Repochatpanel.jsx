@@ -167,7 +167,8 @@ export default function RepoChatPanel({ open, onClose, repoId, repoName }) {
     useEffect(() => () => streamingRef.current?.abort(), []);
 
     useEffect(() => {
-        bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+        const isStreaming = messages[messages.length - 1]?.streaming;
+        bottomRef.current?.scrollIntoView({ behavior: isStreaming ? "auto" : "smooth" });
     }, [messages, loading]);
 
     useEffect(() => {
@@ -207,10 +208,6 @@ export default function RepoChatPanel({ open, onClose, repoId, repoName }) {
         setLoading(true);
         setError(null);
 
-        // Add a placeholder assistant message that will be filled incrementally
-        const assistantIndex = messages.length + 1;
-        setMessages((prev) => [...prev, { role: "assistant", content: "", streaming: true }]);
-
         const history = messages.map((m) => ({ role: m.role, content: m.content }));
 
         const ctrl = streamChatWithRepo(
@@ -219,11 +216,14 @@ export default function RepoChatPanel({ open, onClose, repoId, repoName }) {
             history,
             // onChunk — append token to the streaming message
             (token) => {
+                setLoading(false); // Hide typing indicator once stream starts
                 setMessages((prev) => {
                     const updated = [...prev];
                     const last = updated[updated.length - 1];
-                    if (last?.streaming) {
+                    if (last && last.role === "assistant" && last.streaming) {
                         updated[updated.length - 1] = { ...last, content: last.content + token };
+                    } else {
+                        updated.push({ role: "assistant", content: token, streaming: true });
                     }
                     return updated;
                 });
@@ -233,7 +233,7 @@ export default function RepoChatPanel({ open, onClose, repoId, repoName }) {
                 setMessages((prev) => {
                     const updated = [...prev];
                     const last = updated[updated.length - 1];
-                    if (last?.streaming) {
+                    if (last && last.role === "assistant" && last.streaming) {
                         updated[updated.length - 1] = { ...last, streaming: false };
                     }
                     return updated;

@@ -22,17 +22,20 @@
 
    It looks like:
    ```
-   mongodb+srv://<username>:<password>@cluster0.xxxxx.mongodb.net/?retryWrites=true&w=majority
+   mongodb+srv://<username>:<password>@<cluster_id>.mongodb.net/?retryWrites=true&w=majority
    ```
-6. Replace `<username>` and `<password>` with your credentials.
+6. Replace `<username>`, `<password>`, and `<cluster_id>` with your credentials.
 
 ---
 
-## 2 — Groq API Key
+## 2 — Ollama (Local LLM) Setup
 
-1. Sign up at https://console.groq.com
-2. Go to **API Keys** → Create a new key.
-3. Copy the key (starts with `gsk_`).
+1. Install Ollama from https://ollama.com
+2. Start the Ollama server: `ollama serve`
+3. Pull the required models:
+   ```bash
+   ollama pull qwen2.5-coder:7b-instruct
+   ```
 
 ---
 
@@ -64,11 +67,13 @@ cp .env.example .env
 
 Edit `backend/.env`:
 ```env
-MONGODB_URI=mongodb+srv://youruser:yourpassword@cluster0.xxxxx.mongodb.net/?retryWrites=true&w=majority
-DB_NAME=reposcope
-GROQ_API_KEY=gsk_xxxxxxxxxxxxxxxxxxxxxxxxxxxx
-GITHUB_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxx   # optional
-CORS_ORIGINS=http://localhost:5173
+MONGODB_URI=mongodb+srv://<username>:<password>@<cluster_id>.mongodb.net/?retryWrites=true&w=majority
+DB_NAME=reposcope_ai
+OLLAMA_BASE_URL=http://localhost:11434/v1
+OLLAMA_ANALYSIS_MODEL=qwen2.5-coder:7b-instruct
+OLLAMA_CHAT_MODEL=qwen2.5-coder:7b-instruct
+GITHUB_TOKEN=your_github_token_here   # optional
+CORS_ORIGINS=["http://localhost:5173","http://localhost:3000"]
 ```
 
 Test the server:
@@ -162,10 +167,12 @@ systemctl status reposcope-backend
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `MONGODB_URI` | ✅ | MongoDB Atlas connection string |
-| `DB_NAME` | No | Database name (default: `reposcope`) |
-| `GROQ_API_KEY` | ✅ | Groq API key for Llama-3 |
+| `DB_NAME` | No | Database name (default: `reposcope_ai`) |
+| `OLLAMA_BASE_URL` | ✅ | Ollama API base URL |
+| `OLLAMA_ANALYSIS_MODEL` | ✅ | Model for repo analysis |
+| `OLLAMA_CHAT_MODEL` | ✅ | Model for chat |
 | `GITHUB_TOKEN` | Recommended | GitHub PAT to avoid rate limits |
-| `CORS_ORIGINS` | No | Comma-separated allowed origins |
+| `CORS_ORIGINS` | No | JSON array of allowed origins |
 
 ---
 
@@ -189,6 +196,6 @@ systemctl status reposcope-backend
 
 **`httpx.HTTPStatusError: 404`** — The branch name is wrong. Try `master` instead of `main`.
 
-**`groq.APIConnectionError`** — Check `GROQ_API_KEY` is correct and not expired.
+**`ConnectionError` for Ollama** — Ensure the Ollama server is running with `ollama serve`.
 
 **React Flow shows blank canvas** — Open browser console; check if `/api/v1/graph/<id>` is returning 200. Ensure the Vite proxy is configured correctly.
