@@ -28,5 +28,5 @@ Thumbs.db
 .idea/
 *.swp
 
-#conf
-.conf
+# Config
+logging.conf
