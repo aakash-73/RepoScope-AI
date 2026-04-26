@@ -1,0 +1,41 @@
+name: Deploy RepoScope AI
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Install cloudflared
+        run: |
+          curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o cloudflared
+          chmod +x cloudflared
+          sudo mv cloudflared /usr/local/bin/
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ssh.arndevs.com
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          proxy_host: ssh.arndevs.com
+          proxy_username: ${{ secrets.SSH_USER }}
+          proxy_key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            cd ~/RepoScope-AI
+            git pull origin main
+            cd backend
+            source .venv/bin/activate
+            pip install -r requirements.txt -q
+            cd ../frontend
+            npm install
+            npm run build
+            cd ..
+            pm2 restart reposcope-backend
+            pm2 restart reposcope-frontend
+            pm2 save
+            echo "Deployed successfully!"
