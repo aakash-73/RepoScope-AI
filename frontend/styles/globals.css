@@ -16,7 +16,7 @@
   }
 
   body {
-    background-color: #b72626;
+    background-color: #121212;
     color: #e5e7eb;
     font-family: "DM Sans", sans-serif;
     -webkit-font-smoothing: antialiased;
@@ -142,7 +142,7 @@
 }
 
 .markdown-body p {
-  color: #9CA3AF;
+  color: #B6FF3B;
   font-size: 0.875rem;
   line-height: 1.6;
   margin-bottom: 0.6em;
