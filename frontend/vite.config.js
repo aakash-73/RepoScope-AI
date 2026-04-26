@@ -17,4 +17,14 @@ export default defineConfig({
       },
     },
   },
+  preview: {
+    port: 4173,
+    allowedHosts: ["reposcope-ai.arndevs.com"],
+    proxy: {
+      "/api": {
+        target: "http://localhost:8000",
+        changeOrigin: true,
+      },
+    },
+  },
 });
