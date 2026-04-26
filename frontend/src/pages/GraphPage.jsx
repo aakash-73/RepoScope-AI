@@ -17,7 +17,7 @@ import { fetchGraph, reanalyzeNode } from "../lib/api";
 import { useKeyboardShortcuts } from "../lib/useKeyboardShortcuts";
 
 // Build the SSE URL from the same base as the API
-const SSE_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
+const SSE_BASE = import.meta.env.VITE_API_URL || "";
 
 export default function GraphPage() {
   const [showImport, setShowImport] = useState(false);
