@@ -14,6 +14,7 @@ def _make_aware(v):
 class ImportRequest(BaseModel):
     github_url: str
     branch: str = "main"
+    client_id: str
 
 
 class ImportResponse(BaseModel):
@@ -110,6 +111,7 @@ class RepositoryDoc(BaseModel):
     imported_at: datetime = Field(default_factory=_utcnow)
     github_url: str
     unique_key: str
+    client_id: Optional[str] = None
 
     # Import pipeline state
     status: Literal["ready", "pending", "failed"] = "ready"
@@ -160,6 +162,7 @@ class RepoSummary(BaseModel):
 
     imported_at: datetime = Field(default_factory=_utcnow)
     github_url: str = ""
+    client_id: Optional[str] = None
 
     status: Literal["ready", "pending", "failed"] = "ready"
     error_message: Optional[str] = None

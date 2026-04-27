@@ -1,6 +1,6 @@
 import json
 import logging
-from fastapi import APIRouter, HTTPException, Response, status, Query
+from fastapi import APIRouter, HTTPException, Response, status, Query, Header
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import List, Optional
@@ -152,17 +152,17 @@ async def explain_component(request: ExplainRequest):
 
 
 @router.get("/repos", response_model=List[RepoSummary])
-async def list_repos():
+async def list_repos(x_client_id: Optional[str] = Header(None)):
     try:
-        return await list_repositories()
+        return await list_repositories(x_client_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.delete("/repos/{repo_id}", response_model=DeleteRepoResponse)
-async def delete_repo(repo_id: str):
+async def delete_repo(repo_id: str, x_client_id: Optional[str] = Header(None)):
     try:
-        return await delete_repository(repo_id)
+        return await delete_repository(repo_id, x_client_id)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:

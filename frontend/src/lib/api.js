@@ -2,9 +2,31 @@ import axios from "axios";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
+/**
+ * Retrieves the browser-specific client ID from localStorage,
+ * or generates a new one if it doesn't exist.
+ */
+export function getClientId() {
+  let id = localStorage.getItem("reposcope_client_id");
+  if (!id) {
+    id = crypto.randomUUID();
+    localStorage.setItem("reposcope_client_id", id);
+  }
+  return id;
+}
+
 const api = axios.create({
   baseURL: `${API_BASE}/api/v1`,
   timeout: 120000,
+});
+
+// Automatically include the client ID in every request
+api.interceptors.request.use((config) => {
+  const clientId = getClientId();
+  if (clientId) {
+    config.headers["X-Client-ID"] = clientId;
+  }
+  return config;
 });
 
 export async function listRepos() {
@@ -13,7 +35,12 @@ export async function listRepos() {
 }
 
 export async function importRepo(githubUrl, branch = "main") {
-  const { data } = await api.post("/import", { github_url: githubUrl, branch });
+  const clientId = getClientId();
+  const { data } = await api.post("/import", {
+    github_url: githubUrl,
+    branch,
+    client_id: clientId,
+  });
   return data;
 }
 

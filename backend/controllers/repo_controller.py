@@ -65,12 +65,12 @@ async def import_repository(request: ImportRequest) -> ImportResponse:
     return await _run_import_pipeline(
         db, repo_id, request,
         normalized_owner, normalized_repo, normalized_branch,
-        unique_key, is_retry=False,
+        unique_key, is_retry=False, client_id=request.client_id
     )
 
 
 async def _run_import_pipeline(
-    db, repo_id, request, owner, repo_name, branch, unique_key, is_retry: bool
+    db, repo_id, request, owner, repo_name, branch, unique_key, is_retry: bool, client_id: str = None
 ) -> ImportResponse:
     pending_doc = {
         "repo_id":         repo_id,
@@ -80,6 +80,7 @@ async def _run_import_pipeline(
         "file_count":      0,
         "github_url":      request.github_url,
         "unique_key":      unique_key,
+        "client_id":       client_id,
         "status":          "pending",
         "error_message":   None,
         "last_commit_sha": None,
@@ -330,9 +331,10 @@ async def explain_file(request: ExplainRequest) -> ExplainResponse:
     )
 
 
-async def list_repositories() -> List[RepoSummary]:
+async def list_repositories(client_id: str = None) -> List[RepoSummary]:
     db = get_db()
-    cursor = db.repositories.find({}, {"_id": 0})
+    query = {"client_id": client_id} if client_id else {}
+    cursor = db.repositories.find(query, {"_id": 0})
     repos = await cursor.to_list(length=100)
 
     result = []
@@ -344,9 +346,12 @@ async def list_repositories() -> List[RepoSummary]:
     return result
 
 
-async def delete_repository(repo_id: str) -> dict:
+async def delete_repository(repo_id: str, client_id: str = None) -> dict:
     db = get_db()
-    r1 = await db.repositories.delete_one({"repo_id": repo_id})
+    query = {"repo_id": repo_id}
+    if client_id:
+        query["client_id"] = client_id
+    r1 = await db.repositories.delete_one(query)
     r2 = await db.files.delete_many({"repo_id": repo_id})
 
     await db.file_explanations.delete_many({"repo_id": repo_id})
