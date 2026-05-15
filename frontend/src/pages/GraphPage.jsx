@@ -9,11 +9,12 @@ import GraphCanvas from "../components/graph/GraphCanvas";
 import ComponentSidebar from "../components/sidebar/ComponentSidebar";
 import ImportDialog from "../components/ui/ImportDialog";
 import RepoList from "../components/sidebar/RepoList";
+import GuidedTourWrapper, { TOUR_COMPLETED_KEY } from "../components/ui/GuidedTour";
 import RepoChatPanel from "../components/chat/Repochatpanel";
 import GraphExportDialog from "../components/graph/Graphexportdialog";
 import LanguageLegend from "../components/graph/LanguageLegend";
 import GraphSearch from "../components/graph/GraphSearch";
-import { fetchGraph, reanalyzeNode } from "../lib/api";
+import { fetchGraph, reanalyzeNode, listRepos } from "../lib/api";
 import { useKeyboardShortcuts } from "../lib/useKeyboardShortcuts";
 
 // Build the SSE URL from the same base as the API
@@ -37,6 +38,10 @@ export default function GraphPage() {
   const [chatOpen, setChatOpen] = useState(false);
   const [graphKey, setGraphKey] = useState(0);
   const [viewType, setViewType] = useState("structure"); // "structure" or "semantic"
+  // Auto-start for first-time visitors (no localStorage entry = new user)
+  const [showTutorial, setShowTutorial] = useState(() => !localStorage.getItem(TOUR_COMPLETED_KEY));
+  // "fresh" = no repos, "has-repos" = repos exist but none open, "repo-open" = graph already loaded
+  const [tourMode, setTourMode] = useState("fresh");
 
   const lastClickedNodeId = useRef(null);
   const lastClickTimeRef = useRef(0);
@@ -246,9 +251,12 @@ export default function GraphPage() {
     });
   }, []);
 
-  const handleImportSuccess = useCallback(() => {
+  const handleImportSuccess = useCallback((result) => {
     setRepoListKey((k) => k + 1);
-  }, []);
+    if (result) {
+      handleSelectRepo(result);
+    }
+  }, [handleSelectRepo]);
 
   const handleSyncComplete = useCallback(async (syncedRepoId, syncResult) => {
     // Only refresh graph if the synced repo is the one currently open
@@ -280,7 +288,14 @@ export default function GraphPage() {
   const isAnalyzing = analysisStatus?.repo_analysis_status === "analyzing";
 
   return (
-    <div className="h-full flex overflow-hidden">
+    <GuidedTourWrapper
+      run={showTutorial}
+      onFinish={() => setShowTutorial(false)}
+      isGraphReady={isRepoOpen}
+      isGraphLoading={graphLoading}
+      tourMode={tourMode}
+    >
+      <div className="h-full flex overflow-hidden">
       {/* ── Left sidebar ─────────────────────────────────────────────── */}
       <motion.aside
         initial={{ x: -20, opacity: 0 }}
@@ -301,17 +316,41 @@ export default function GraphPage() {
           </p>
         </div>
 
-        <div className="px-4 py-3 border-b border-white/5">
+        <div className="px-4 py-3 border-b border-white/5 space-y-2">
           <button
             onClick={() => setShowImport(true)}
-            className="btn-moss w-full flex items-center justify-center gap-2 text-sm"
+            className="btn-moss w-full flex items-center justify-center gap-2 text-sm tour-import-btn"
           >
             <Plus size={15} />
             Import Repository
           </button>
+          <button
+            onClick={async () => {
+              let mode = "fresh";
+              if (selectedRepo && graphData && !graphLoading) {
+                // A repo is already open — skip the import step
+                mode = "repo-open";
+              } else {
+                // Check if any repos exist in the list
+                try {
+                  const repos = await listRepos();
+                  const readyRepo = repos.find((r) => r.status === "ready");
+                  if (readyRepo) {
+                    mode = "has-repos";
+                    handleSelectRepo(readyRepo); // auto-load the top repo
+                  }
+                } catch { /* silent */ }
+              }
+              setTourMode(mode);
+              setShowTutorial(true);
+            }}
+            className="w-full flex items-center justify-center gap-2 text-xs py-1.5 rounded-lg border border-white/10 bg-white/5 text-slate-300 hover:text-white hover:bg-white/10 transition-colors"
+          >
+            Tutorial
+          </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-3">
+        <div className="flex-1 overflow-y-auto p-3 tour-repo-list">
           <p className="text-[10px] uppercase tracking-wider text-slate-600 font-display mb-2 px-1">
             Repositories
           </p>
@@ -398,7 +437,7 @@ export default function GraphPage() {
       </motion.aside>
 
       {/* ── Main canvas area ─────────────────────────────────────────── */}
-      <div className="flex-1 flex relative overflow-hidden">
+      <div className="flex-1 flex relative overflow-hidden tour-graph-canvas">
 
         {/* Repo header bar */}
         <AnimatePresence>
@@ -409,7 +448,7 @@ export default function GraphPage() {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -8 }}
               transition={{ duration: 0.2 }}
-              className="absolute top-4 left-4 z-10 flex items-center gap-2.5 px-3.5 py-2 rounded-xl glass border border-white/8"
+              className="absolute top-4 left-4 z-10 flex items-center gap-2.5 px-3.5 py-2 rounded-xl glass border border-white/8 tour-graph-controls"
             >
               <div className="w-6 h-6 rounded-md bg-moss/15 border border-moss/20 flex items-center justify-center flex-shrink-0">
                 <Network size={11} className="text-moss" />
@@ -461,7 +500,7 @@ export default function GraphPage() {
               <button
                 onClick={() => setShowExport(true)}
                 title="Export graph"
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-white/5 border border-white/10 hover:bg-moss/15 hover:border-moss/30 text-slate-500 hover:text-moss transition-all text-xs font-display"
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-white/5 border border-white/10 hover:bg-moss/15 hover:border-moss/30 text-slate-500 hover:text-moss transition-all text-xs font-display tour-export-btn"
               >
                 <Download size={12} />
                 Export
@@ -654,6 +693,7 @@ export default function GraphPage() {
           onSuccess={handleImportSuccess}
         />
       )}
-    </div>
+      </div>
+    </GuidedTourWrapper>
   );
 }

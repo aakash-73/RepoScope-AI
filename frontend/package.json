@@ -10,6 +10,7 @@
     "test": "vitest"
   },
   "dependencies": {
+    "@reactour/tour": "^3.8.0",
     "@xyflow/react": "^12.3.6",
     "axios": "^1.7.2",
     "clsx": "^2.1.1",

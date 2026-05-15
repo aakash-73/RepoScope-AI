@@ -1,5 +1,6 @@
 import uuid
 import hashlib
+from datetime import datetime, timezone
 
 from typing import List
 
@@ -85,6 +86,7 @@ async def _run_import_pipeline(
         "error_message":   None,
         "last_commit_sha": None,
         "last_synced_at":  None,
+        "imported_at":     datetime.now(timezone.utc),
     }
 
     if is_retry:

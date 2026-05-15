@@ -604,7 +604,7 @@ const GraphCanvasInner = forwardRef(function GraphCanvasInner(
                     zIndex: 10,
                     position: "relative",
                   }}
-                  className="w-12 h-12 rounded-full bg-moss shadow-lg shadow-moss/30 flex items-center justify-center"
+                  className="w-12 h-12 rounded-full bg-moss shadow-lg shadow-moss/30 flex items-center justify-center tour-chat-btn"
                 >
                   <MessageCircle size={20} className="text-charcoal-300" />
                   <span className="absolute inset-0 rounded-full bg-moss/40 animate-ping pointer-events-none" />
