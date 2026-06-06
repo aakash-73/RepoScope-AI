@@ -1,6 +1,10 @@
-from pydantic import BaseModel, Field, field_validator
+import re
+from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import Optional, List, Dict, Any, Literal
 from datetime import datetime, timezone
+
+# Characters that can be used to hijack LLM prompts — strip from user input
+_CONTROL_CHAR_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
@@ -12,9 +16,27 @@ def _make_aware(v):
     return v
 
 class ImportRequest(BaseModel):
-    github_url: str
-    branch: str = "main"
-    client_id: str
+    github_url: str = Field(..., max_length=300)
+    branch: str = Field(default="main", max_length=100)
+    client_id: str = Field(..., max_length=128)
+
+    @field_validator("github_url")
+    @classmethod
+    def validate_github_url(cls, v: str) -> str:
+        v = v.strip()
+        if not re.match(r"^(https?://github\.com/[\w.\-]+/[\w.\-]+(\.git)?/?|[\w.\-]+/[\w.\-]+)$", v):
+            raise ValueError("Invalid GitHub URL or owner/repo format")
+        return v
+
+    @field_validator("branch")
+    @classmethod
+    def validate_branch(cls, v: str) -> str:
+        v = v.strip()
+        if not re.match(r"^[\w.\-/]+$", v):
+            raise ValueError("Branch name contains invalid characters")
+        if ".." in v:
+            raise ValueError("Branch name cannot contain path traversal sequences ('..')")
+        return v
 
 
 class ImportResponse(BaseModel):
@@ -183,12 +205,22 @@ class ChatMessage(BaseModel):
 
 
 class ComponentChatRequest(BaseModel):
-    repo_id: str
-    file_path: str
-    query: str
-    history: List[ChatMessage] = Field(default_factory=list)
+    repo_id: str = Field(..., max_length=128)
+    file_path: str = Field(..., max_length=512)
+    query: str = Field(..., min_length=1, max_length=2000)
+    history: List[ChatMessage] = Field(default_factory=list, max_length=60)
+
+    @field_validator("query")
+    @classmethod
+    def sanitize_query(cls, v: str) -> str:
+        return _CONTROL_CHAR_RE.sub("", v).strip()
 
 
 class RepoChatRequest(BaseModel):
-    query: str
-    history: List[ChatMessage] = Field(default_factory=list)
+    query: str = Field(..., min_length=1, max_length=2000)
+    history: List[ChatMessage] = Field(default_factory=list, max_length=60)
+
+    @field_validator("query")
+    @classmethod
+    def sanitize_query(cls, v: str) -> str:
+        return _CONTROL_CHAR_RE.sub("", v).strip()

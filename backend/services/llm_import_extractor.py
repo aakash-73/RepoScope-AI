@@ -4,11 +4,26 @@ import hashlib
 import json
 import logging
 import re
+import concurrent.futures
 from typing import Optional
 
 from openai import AsyncOpenAI
 from config import settings
 from database import get_db
+
+_executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+
+def is_safe_regex(pattern_str: str) -> bool:
+    if not pattern_str or not isinstance(pattern_str, str):
+        return False
+    # Reject nested quantifiers like (a+)+ or (a*)* to prevent catastrophic backtracking
+    if re.search(r"\([^)]*[+*?]\)[+*?]", pattern_str):
+        return False
+    try:
+        re.compile(pattern_str)
+        return True
+    except re.error:
+        return False
 
 _log = logging.getLogger(__name__)
 
@@ -75,11 +90,13 @@ async def _load_language_patterns(language: str) -> list[re.Pattern]:
             compiled = []
             for p in doc["patterns"]:
                 try:
-                    compiled.append({
-                        "pattern": re.compile(p["regex"], re.MULTILINE),
-                        "group": p.get("group", 1),
-                    })
-                except re.error:
+                    regex_str = p.get("regex")
+                    if is_safe_regex(regex_str):
+                        compiled.append({
+                            "pattern": re.compile(regex_str, re.MULTILINE),
+                            "group": p.get("group", 1),
+                        })
+                except Exception:
                     pass
             _pattern_cache[language] = compiled
             _log.debug("Loaded %d cached patterns for %s", len(compiled), language)
@@ -92,17 +109,25 @@ async def _load_language_patterns(language: str) -> list[re.Pattern]:
 
 async def _save_language_patterns(language: str, raw_patterns: list[dict]) -> None:
     try:
+        safe_patterns = []
+        for p in raw_patterns:
+            regex_str = p.get("regex")
+            if is_safe_regex(regex_str):
+                safe_patterns.append(p)
+        if not safe_patterns:
+            return
+
         db = get_db()
         await db.import_patterns.update_one(
             {"language": language},
             {"$set": {
                 "language": language,
-                "patterns": raw_patterns,
+                "patterns": safe_patterns,
                 "source": "llm_derived",
             }},
             upsert=True,
         )
-        _log.debug("Saved %d patterns for %s to cache", len(raw_patterns), language)
+        _log.debug("Saved %d patterns for %s to cache", len(safe_patterns), language)
         _pattern_cache.pop(language, None)
     except Exception as e:
         _log.warning("Failed to save patterns for %s: %s", language, e)
@@ -134,16 +159,28 @@ async def _save_file_cache(content_hash: str, language: str, imports: list[str])
     except Exception as e:
         _log.warning("File cache write failed: %s", e)
 
+def _match_single_pattern(pattern: re.Pattern, content: str, group: int) -> list[str]:
+    imports = []
+    for m in pattern.finditer(content):
+        try:
+            val = m.group(group).strip()
+            if val:
+                imports.append(val)
+        except (IndexError, AttributeError):
+            pass
+    return imports
+
 def _extract_with_patterns(content: str, patterns: list[dict]) -> list[str]:
     imports = []
     for p in patterns:
         try:
-            for m in p["pattern"].finditer(content):
-                val = m.group(p["group"]).strip()
-                if val:
-                    imports.append(val)
-        except (IndexError, AttributeError):
-            pass
+            future = _executor.submit(_match_single_pattern, p["pattern"], content, p["group"])
+            res = future.result(timeout=1.0)
+            imports.extend(res)
+        except concurrent.futures.TimeoutError:
+            _log.warning("Regex match timed out (possible ReDoS): %s", p["pattern"].pattern)
+        except Exception as e:
+            _log.debug("Regex match failed: %s", e)
     return imports
 
 async def _extract_with_llm(language: str, content: str) -> tuple[list[str], list[dict]]:

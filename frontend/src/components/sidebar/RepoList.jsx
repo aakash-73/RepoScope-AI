@@ -13,8 +13,8 @@ function StatusBadge({ status, analysisStatus }) {
   if (status === "ready") {
     if (analysisStatus === "understood") {
       return (
-        <span className="flex items-center gap-1 text-[9px] text-moss font-display font-bold">
-          <span className="text-[10px]">⚡</span>
+        <span className="flex items-center gap-1 text-[9px] text-emerald-400/80 font-display font-bold">
+          <Zap size={9} />
           understood
         </span>
       );
@@ -115,6 +115,26 @@ export default function RepoList({
     load();
   }, [refreshKey]);
 
+  // Sync terminal analysis states back into local repo state so StatusBadge
+  // stays correct after analysis finishes (without needing a full list refresh)
+  useEffect(() => {
+    if (!analysisMap || Object.keys(analysisMap).length === 0) return;
+    setRepos((prev) =>
+      prev.map((r) => {
+        const ai = analysisMap[r.repo_id];
+        if (!ai) return r;
+        // When SSE reports a terminal state, sync it back so StatusBadge is accurate
+        if (ai.status === "understood" && r.analysis_status !== "understood") {
+          return { ...r, analysis_status: "understood" };
+        }
+        if (ai.status === "done" && r.analysis_status !== "done") {
+          return { ...r, analysis_status: "done" };
+        }
+        return r;
+      })
+    );
+  }, [analysisMap]);
+
   async function load() {
     setLoading(true);
     try {
@@ -184,6 +204,11 @@ export default function RepoList({
               ...r,
               file_count: r.file_count + result.added - result.deleted,
               last_synced_at: new Date().toISOString(),
+              // If files changed, mark as analyzing so StatusBadge and
+              // the progress bar section activate immediately
+              ...(result.added > 0 || result.modified > 0 || result.deleted > 0
+                ? { analysis_status: "analyzing" }
+                : {}),
             }
             : r
         )
@@ -448,7 +473,12 @@ export default function RepoList({
             <div className="mt-1.5">
               <StatusBadge
                 status={repo.status || "ready"}
-                analysisStatus={repo.analysis_status}
+                analysisStatus={
+                  // Prefer live SSE data from analysisMap over stale local state
+                  analysisMap[repo.repo_id]?.status === "analyzing"
+                    ? "analyzing"
+                    : repo.analysis_status
+                }
               />
             </div>
 

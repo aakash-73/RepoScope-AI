@@ -11,7 +11,9 @@ def event_loop():
     yield loop
     loop.close()
 
-@pytest.fixture
+import pytest_asyncio
+
+@pytest_asyncio.fixture
 async def client():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         yield ac
@@ -30,6 +32,10 @@ def mock_db():
 
 @pytest.fixture(autouse=True)
 def override_get_db(mock_db):
+    import database
+    original_db = database.db
+    database.db = mock_db
     app.dependency_overrides[get_db] = lambda: mock_db
     yield
+    database.db = original_db
     app.dependency_overrides.clear()

@@ -119,6 +119,7 @@ const GraphCanvasInner = forwardRef(function GraphCanvasInner(
   const { fitView, getViewport, setViewport } = useReactFlow();
   const [collapsedFolders, setCollapsedFolders] = useState(new Set());
   const taggedRef = useReactRef({ nodes: [], edges: [] });
+  const nodePositionsRef = useReactRef({});   // { nodeId → { x, y } } for incremental semantic updates
 
   // ── FIX: track whether initial folder state has been set for this repo ──
   // Without this, every SSE node_update patch triggers graphData to change,
@@ -147,6 +148,7 @@ const GraphCanvasInner = forwardRef(function GraphCanvasInner(
   // the flag for new repos without resetting it on every patch.
   useEffect(() => {
     initialFoldersSetRef.current = false;
+    nodePositionsRef.current = {};   // clear saved positions on full graph reset
   }, [graphData?.repo_id, graphKey]);
 
   // ── Tag nodes + set initial folder collapse state ─────────────────────
@@ -206,6 +208,31 @@ const GraphCanvasInner = forwardRef(function GraphCanvasInner(
       // sees the full architecture by default.
       setCollapsedFolders(new Set());
     } else {
+      if (graphData.is_semantic) {
+        // ── Incremental semantic update ──────────────────────────────────
+        // Detect nodes that the polling added since the last layout run.
+        // If any exist, re-tag everything and trigger a layout pass with
+        // position seeding so existing nodes barely move.
+        const existingIds = new Set(taggedRef.current.nodes.map((n) => n.id));
+        const hasNewNodes = graphData.nodes.some((n) => !existingIds.has(n.id));
+        if (hasNewNodes) {
+          taggedRef.current.nodes = graphData.nodes.map((n) => ({
+            ...n,
+            data: {
+              ...n.data,
+              isSemantic: true,
+              is_dead: false,
+              complexity_score: 1,
+              is_circular: false,
+            },
+          }));
+          taggedRef.current.edges = graphData.edges;
+          // Trigger layout effect by updating collapsedFolders reference.
+          // New Set() !== old Set() → effect fires, positions are seeded.
+          setCollapsedFolders(new Set());
+          return;
+        }
+      }
       // SSE patch — collapsedFolders didn't change so the layout effect won't
       // fire. Surgically push the updated analysis_status values into the live
       // ReactFlow nodes so CodeNode re-renders and animates (ghost → solid /
@@ -232,12 +259,13 @@ const GraphCanvasInner = forwardRef(function GraphCanvasInner(
   // only needs to react to collapsedFolders and handleToggleCollapse.
   useEffect(() => {
     if (!taggedRef.current.nodes.length) return;
-    
+
     let ln, le;
     if (graphData.is_semantic) {
       const result = applyForceLayout(
         taggedRef.current.nodes,
-        taggedRef.current.edges
+        taggedRef.current.edges,
+        { existingPositions: nodePositionsRef.current }  // seed existing positions
       );
       ln = result.nodes;
       le = result.edges;
@@ -255,10 +283,20 @@ const GraphCanvasInner = forwardRef(function GraphCanvasInner(
         ? { ...n, data: { ...n.data, onToggleCollapse: handleToggleCollapse } }
         : n
     );
+
+    // Track positions so the next incremental update can seed from them
+    if (graphData.is_semantic) {
+      const posMap = {};
+      withCallbacks.forEach((n) => {
+        if (n.position) posMap[n.id] = { x: n.position.x, y: n.position.y };
+      });
+      nodePositionsRef.current = posMap;
+    }
+
     setNodes(withCallbacks);
     setEdges(prepareEdges(le, withCallbacks));
     setTimeout(() => fitView({ padding: 0.12, duration: 600 }), 100);
-  }, [collapsedFolders, handleToggleCollapse]);
+  }, [collapsedFolders, handleToggleCollapse, graphData?.is_semantic, graphData?.repo_id, graphKey]);
 
   const handleNodeMouseEnter = useCallback((_, node) => {
     if (node.type !== "codeNode") return;
@@ -646,6 +684,32 @@ const GraphCanvas = forwardRef(function GraphCanvas(
           <p className="text-slate-500 font-display text-sm">
             Select a repository to visualise its architecture
           </p>
+        </div>
+      </div>
+    );
+  }
+
+  // Semantic view: show a helpful overlay when the Knowledge Graph hasn't
+  // been populated yet (i.e. LLM analysis hasn't run or finished).
+  if (graphData.is_semantic && graphData.no_data) {
+    return (
+      <div className="flex-1 flex items-center justify-center">
+        <div className="text-center space-y-4 max-w-sm px-6">
+          <div className="w-16 h-16 rounded-2xl bg-blue-500/10 border border-blue-500/20 mx-auto flex items-center justify-center">
+            <span className="text-3xl">🧠</span>
+          </div>
+          <p className="text-slate-300 font-display text-sm font-semibold">
+            Knowledge Graph not ready yet
+          </p>
+          <p className="text-slate-500 text-xs leading-relaxed">
+            The semantic view is built from AI analysis. Wait for the analysis
+            to finish (watch the progress bar below), then switch to Semantic View.
+          </p>
+          {isAnalyzing && (
+            <div className="flex items-center justify-center gap-2 text-blue-400 text-xs animate-pulse">
+              <span>Analysing…</span>
+            </div>
+          )}
         </div>
       </div>
     );

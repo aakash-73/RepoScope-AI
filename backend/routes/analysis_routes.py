@@ -1,20 +1,34 @@
 import asyncio
 import json
-from fastapi import APIRouter, HTTPException
+import logging
+from fastapi import APIRouter, HTTPException, Header, Query
 from fastapi.responses import StreamingResponse
+from typing import Optional
 from database import get_db
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 
-@router.get("/{repo_id}/status")
-async def get_analysis_status(repo_id: str):
+async def _check_ownership(repo_id: str, client_id: Optional[str] = None):
     db = get_db()
-
     repo = await db.repositories.find_one({"repo_id": repo_id})
     if not repo:
         raise HTTPException(status_code=404, detail="Repository not found")
+    
+    db_client_id = repo.get("client_id")
+    if db_client_id and db_client_id != client_id:
+        raise HTTPException(status_code=404, detail="Repository not found")
+    return repo
 
+
+@router.get("/{repo_id}/status")
+async def get_analysis_status(repo_id: str, x_client_id: Optional[str] = Header(None)):
+    await _check_ownership(repo_id, x_client_id)
+    db = get_db()
+
+    repo = await db.repositories.find_one({"repo_id": repo_id})
     total_nodes = await db.files.count_documents({"repo_id": repo_id})
     completed_nodes = await db.node_analysis.count_documents(
         {"repo_id": repo_id, "status": "done"}
@@ -54,32 +68,12 @@ async def get_analysis_status(repo_id: str):
 
 
 @router.get("/{repo_id}/stream")
-async def stream_analysis_status(repo_id: str):
+async def stream_analysis_status(repo_id: str, client_id: Optional[str] = Query(default=None)):
     """
     SSE endpoint. Streams node status change events to the frontend as they happen.
-
-    Each event is a JSON object in one of these shapes:
-
-      Node transition (fires whenever a single node changes status):
-        { "type": "node_update", "file_path": "src/foo.py", "analysis_status": "analyzing" | "done" | "failed" }
-
-      Progress heartbeat (fires every ~1s so the progress bar stays accurate):
-        { "type": "progress", "completed": 12, "total": 40, "percentage": 30.0,
-          "current_file": "src/bar.py", "repo_analysis_status": "analyzing" }
-
-      Terminal event (fires once when the whole repo is done or failed, then the stream closes):
-        { "type": "done", "repo_analysis_status": "done" | "understood" | "failed" }
-
-    The frontend should:
-      1. On "node_update" — patch that single node's analysis_status in graphData state (no re-fetch).
-      2. On "progress"    — update the progress bar / current-file toast.
-      3. On "done"        — close the EventSource and do one final fetchGraph() to get clean state.
     """
+    await _check_ownership(repo_id, client_id)
     db = get_db()
-
-    repo = await db.repositories.find_one({"repo_id": repo_id})
-    if not repo:
-        raise HTTPException(status_code=404, detail="Repository not found")
 
     async def event_generator():
         # Track which statuses we have already reported so we only emit changes.
@@ -102,53 +96,58 @@ async def stream_analysis_status(repo_id: str):
         terminal_statuses = {"done", "understood", "failed"}
 
         while True:
-            # ── 1. Check for node-level status changes ──────────────────
-            cursor = db.files.find(
-                {"repo_id": repo_id},
-                {"path": 1, "analysis_status": 1},
-            )
-            async for doc in cursor:
-                path = doc["path"]
-                new_status = doc.get("analysis_status", "pending")
-                if known.get(path) != new_status:
-                    known[path] = new_status
-                    yield _sse({
-                        "type": "node_update",
-                        "file_path": path,
-                        "analysis_status": new_status,
-                    })
+            try:
+                # ── 1. Check for node-level status changes ──────────────────
+                cursor = db.files.find(
+                    {"repo_id": repo_id},
+                    {"path": 1, "analysis_status": 1},
+                )
+                async for doc in cursor:
+                    path = doc["path"]
+                    new_status = doc.get("analysis_status", "pending")
+                    if known.get(path) != new_status:
+                        known[path] = new_status
+                        yield _sse({
+                            "type": "node_update",
+                            "file_path": path,
+                            "analysis_status": new_status,
+                        })
 
-            # ── 2. Emit a progress heartbeat ────────────────────────────
-            total = await db.files.count_documents({"repo_id": repo_id})
-            completed = await db.node_analysis.count_documents(
-                {"repo_id": repo_id, "status": "done"}
-            )
-            analyzing_doc = await db.node_analysis.find_one(
-                {"repo_id": repo_id, "status": "analyzing"},
-                {"file_path": 1},
-            )
-            current_file = analyzing_doc["file_path"] if analyzing_doc else None
+                # ── 2. Emit a progress heartbeat ────────────────────────────
+                total = await db.files.count_documents({"repo_id": repo_id})
+                completed = await db.node_analysis.count_documents(
+                    {"repo_id": repo_id, "status": "done"}
+                )
+                analyzing_doc = await db.node_analysis.find_one(
+                    {"repo_id": repo_id, "status": "analyzing"},
+                    {"file_path": 1},
+                )
+                current_file = analyzing_doc["file_path"] if analyzing_doc else None
 
-            repo_doc = await db.repositories.find_one(
-                {"repo_id": repo_id}, {"analysis_status": 1}
-            )
-            repo_status = repo_doc.get("analysis_status", "pending") if repo_doc else "pending"
+                repo_doc = await db.repositories.find_one(
+                    {"repo_id": repo_id}, {"analysis_status": 1}
+                )
+                repo_status = repo_doc.get("analysis_status", "pending") if repo_doc else "pending"
 
-            yield _sse({
-                "type": "progress",
-                "completed": completed,
-                "total": total,
-                "percentage": round((completed / total * 100) if total > 0 else 0, 1),
-                "current_file": current_file,
-                "repo_analysis_status": repo_status,
-            })
+                yield _sse({
+                    "type": "progress",
+                    "completed": completed,
+                    "total": total,
+                    "percentage": round((completed / total * 100) if total > 0 else 0, 1),
+                    "current_file": current_file,
+                    "repo_analysis_status": repo_status,
+                })
 
-            # ── 3. Check for terminal state ──────────────────────────────
-            if repo_status in terminal_statuses:
-                yield _sse({"type": "done", "repo_analysis_status": repo_status})
+                # ── 3. Check for terminal state ──────────────────────────────
+                if repo_status in terminal_statuses:
+                    yield _sse({"type": "done", "repo_analysis_status": repo_status})
+                    return
+
+                await asyncio.sleep(1)
+            except Exception as e:
+                logger.exception("Error in SSE event generator for %s", repo_id)
+                yield _sse({"type": "error", "message": "Stream error"})
                 return
-
-            await asyncio.sleep(1)
 
     return StreamingResponse(
         event_generator(),
@@ -168,7 +167,8 @@ def _sse(payload: dict) -> str:
 
 
 @router.get("/{repo_id}/repo")
-async def get_repo_analysis(repo_id: str):
+async def get_repo_analysis(repo_id: str, x_client_id: Optional[str] = Header(None)):
+    await _check_ownership(repo_id, x_client_id)
     db = get_db()
     doc = await db.repo_analysis.find_one(
         {"repo_id": repo_id, "status": "done"}, {"_id": 0}
@@ -182,7 +182,8 @@ async def get_repo_analysis(repo_id: str):
 
 
 @router.get("/{repo_id}/node")
-async def get_node_analysis(repo_id: str, file_path: str):
+async def get_node_analysis(repo_id: str, file_path: str, x_client_id: Optional[str] = Header(None)):
+    await _check_ownership(repo_id, x_client_id)
     db = get_db()
     doc = await db.node_analysis.find_one(
         {"repo_id": repo_id, "file_path": file_path, "status": "done"},

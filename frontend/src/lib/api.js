@@ -26,6 +26,10 @@ api.interceptors.request.use((config) => {
   if (clientId) {
     config.headers["X-Client-ID"] = clientId;
   }
+  const apiKey = import.meta.env.VITE_API_KEY || "";
+  if (apiKey) {
+    config.headers["Authorization"] = `Bearer ${apiKey}`;
+  }
   return config;
 });
 
@@ -172,9 +176,19 @@ export function streamChatWithRepo(repoId, query, history, onChunk, onDone, onEr
 
   (async () => {
     try {
+      const apiKey = import.meta.env.VITE_API_KEY || "";
+      const clientId = getClientId();
+      const headers = { "Content-Type": "application/json" };
+      if (apiKey) {
+        headers["Authorization"] = `Bearer ${apiKey}`;
+      }
+      if (clientId) {
+        headers["X-Client-ID"] = clientId;
+      }
+
       const resp = await fetch(`/api/v1/repo/${repoId}/chat/stream`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({ query, history }),
         signal: controller.signal,
       });

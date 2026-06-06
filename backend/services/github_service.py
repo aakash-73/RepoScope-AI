@@ -94,11 +94,22 @@ def _parse_github_url(url: str):
     url = url.strip().rstrip("/")
     match = re.match(r"https?://github\.com/([^/]+)/([^/]+?)(?:\.git)?$", url)
     if match:
-        return match.group(1), match.group(2)
-    match = re.match(r"^([^/]+)/([^/]+)$", url)
-    if match:
-        return match.group(1), match.group(2)
-    raise ValueError(f"Cannot parse GitHub URL: {url}")
+        owner, repo = match.group(1), match.group(2)
+    else:
+        match = re.match(r"^([^/]+)/([^/]+)$", url)
+        if match:
+            owner, repo = match.group(1), match.group(2)
+        else:
+            raise ValueError(f"Cannot parse GitHub URL: {url}")
+
+    # Validate that owner and repo only contain alphanumeric characters, hyphens, dots, and underscores
+    # and explicitly disallow path traversal '..'
+    if not re.match(r"^[\w.\-]+$", owner) or not re.match(r"^[\w.\-]+$", repo):
+        raise ValueError("GitHub owner or repository name contains invalid characters")
+    if ".." in owner or ".." in repo:
+        raise ValueError("GitHub owner or repository name cannot contain path traversal sequences ('..')")
+
+    return owner, repo
 
 
 def _build_headers() -> dict:
@@ -156,6 +167,10 @@ async def get_latest_commit_sha(github_url: str, branch: str) -> Optional[str]:
 
 
 async def download_and_extract(github_url: str, branch: str = "main") -> List[Dict]:
+    # Strictly validate branch name to prevent path traversal or injection
+    if not re.match(r"^[\w.\-/]+$", branch) or ".." in branch:
+        raise ValueError("Invalid branch name")
+
     owner, repo = _parse_github_url(github_url)
     headers = _build_headers()
 

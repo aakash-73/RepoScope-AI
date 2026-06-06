@@ -1,5 +1,6 @@
 import pytest
 from httpx import AsyncClient
+from unittest.mock import AsyncMock, MagicMock
 
 @pytest.mark.asyncio
 async def test_health_check(client: AsyncClient):
@@ -13,10 +14,9 @@ async def test_list_repos_empty(client: AsyncClient, mock_db):
     # The actual controller calls list_repositories() in repo_controller.py
     # For simplicity, we just mock the DB find result if the controller uses it.
     
-    # In list_repositories:
-    # async for doc in db.repositories.find({}): ...
-    
-    mock_db.repositories.find.return_value.__aiter__.return_value = []
+    mock_cursor = MagicMock()
+    mock_cursor.to_list = AsyncMock(return_value=[])
+    mock_db.repositories.find = MagicMock(return_value=mock_cursor)
     
     response = await client.get("/api/v1/repos")
     assert response.status_code == 200

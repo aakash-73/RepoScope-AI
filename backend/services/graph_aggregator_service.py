@@ -31,6 +31,9 @@ async def get_dual_view_graph(repo_id: str, view_type: str = "structure") -> dic
         })
         kg_edges = await edges_cursor.to_list(length=None)
         
+        # If no semantic nodes exist yet, flag it as no_data so frontend can overlay a nice loading/waiting UI
+        no_data = len(kg_nodes) == 0
+
         # Format for React Flow
         formatted_nodes = []
         for n in kg_nodes:
@@ -77,7 +80,9 @@ async def get_dual_view_graph(repo_id: str, view_type: str = "structure") -> dic
             "repo_id": repo_id,
             "nodes": formatted_nodes,
             "edges": formatted_edges,
-            "is_semantic": True
+            "circular_paths": [],  # added for frontend format consistency
+            "is_semantic": True,
+            "no_data": no_data
         }
     
-    return {"nodes": [], "edges": []}
+    return {"nodes": [], "edges": [], "circular_paths": [], "no_data": True}

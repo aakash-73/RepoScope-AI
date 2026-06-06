@@ -7,6 +7,18 @@ class Settings(BaseSettings):
     MONGODB_URI: str
     DB_NAME: str = "reposcope"
 
+    # ─── Security ─────────────────────────────────────────────────────────────
+    # Set a strong random string in production to enable API key authentication.
+    # Leave blank (default) to disable auth — safe for purely local/LAN use.
+    # Generate one with:  python -c "import secrets; print(secrets.token_hex(32))"
+    API_KEY: str = ""
+
+    # ─── Server ───────────────────────────────────────────────────────────────
+    # 127.0.0.1 = localhost only (safe default).
+    # Set to 0.0.0.0 only if you need LAN/public access AND have a firewall.
+    HOST: str = "127.0.0.1"
+    DEBUG: bool = False   # set True only in local dev; enables uvicorn reload
+
     # ─── Ollama (self-hosted LLM — no API key needed) ─────────────────────────
     # Point this at wherever Ollama is running.
     # Local dev  : http://localhost:11434/v1
