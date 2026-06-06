@@ -614,7 +614,22 @@ reposcope-ai/
 
 ---
 
-## 🔐 Environment Variables
+## 🔐 Security & Hardening
+
+RepoScope AI includes production-grade security safeguards to secure the application API and protect against malicious input:
+
+- **API Key Authentication**: Optional key-based authentication (`API_KEY`) protects all endpoints. When active, requests require an `Authorization: Bearer <key>` header (automatically handled by the frontend). SSE streams authorize via URL query parameters.
+- **IDOR Protection**: Validates resource ownership for all repository actions, graphs, file content retrieval, chats, and SSE status streams, ensuring users only access repositories matching their client identity.
+- **ReDoS Mitigation**:
+  - Automatically sanitizes and runs safety filters (e.g. rejecting nested quantifiers) on LLM-derived import regex patterns.
+  - Offloads regex evaluation to a `ThreadPoolExecutor` with a strict `1.0s` timeout per execution to protect against denial-of-service.
+- **Prompt Injection Defense**: Implements strict system prompt safety instructions in LLM services, refusing queries trying to escape bounds or simulate commands, combined with Pydantic request limits.
+- **Directory Traversal Protection**: Enforces alphanumeric and safe character restrictions on GitHub owners, repositories, and branches to block directory traversal (`..`) attempts.
+- **Safe Server Defaults**: Limits CORS headers, binds the ASGI host to `127.0.0.1` by default, disables developer Uvicorn auto-reload in production, and prevents raw exception details from leaking to clients.
+
+---
+
+## ⚙️ Environment Variables
 
 Create `backend/.env` from the provided template:
 
