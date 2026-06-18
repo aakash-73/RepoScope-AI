@@ -445,6 +445,22 @@ async def chat_component(request: ComponentChatRequest):
             f"Exports: {', '.join(pre_analyzed.get('exports', []))}\n"
             f"Concerns: {', '.join(pre_analyzed.get('concerns', []))}\n"
         )
+        try:
+            reply = await chat_with_component(
+                file_path=file_doc["path"],
+                content=file_doc["content"],
+                language=file_doc.get("language", "text"),
+                imports=file_doc.get("imports", []),
+                user_query=request.query,
+                history=[m.model_dump() for m in request.history],
+                context_override=context,
+            )
+        except ValueError as exc:
+            # Guardrail refusals are returned as a reply so the UI can render them gracefully.
+            return {"reply": str(exc)}
+        return {"reply": reply}
+
+    try:
         reply = await chat_with_component(
             file_path=file_doc["path"],
             content=file_doc["content"],
@@ -452,16 +468,8 @@ async def chat_component(request: ComponentChatRequest):
             imports=file_doc.get("imports", []),
             user_query=request.query,
             history=[m.model_dump() for m in request.history],
-            context_override=context,
         )
-        return {"reply": reply}
-
-    reply = await chat_with_component(
-        file_path=file_doc["path"],
-        content=file_doc["content"],
-        language=file_doc.get("language", "text"),
-        imports=file_doc.get("imports", []),
-        user_query=request.query,
-        history=[m.model_dump() for m in request.history],
-    )
+    except ValueError as exc:
+        # Guardrail refusals are returned as a reply so the UI can render them gracefully.
+        return {"reply": str(exc)}
     return {"reply": reply}

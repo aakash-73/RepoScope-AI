@@ -1,6 +1,7 @@
 from database import get_db
 from services.repo_chat_service import summarize_repo, chat_with_repo, build_communication_map, get_pre_analyzed_repo_context
 from services.graph_builder import build_dependency_graph
+from services.guardrail_service import check_query_relevance
 import logging
 
 logger = logging.getLogger(__name__)
@@ -178,6 +179,13 @@ async def repo_chat(repo_id: str, query: str, history: list[dict]) -> dict:
     Answer a user question using the cached understanding document.
     Never touches raw file content — always uses the pre-built understanding.
     """
+    # ── Layer-1 Guardrail ──────────────────────────────────────────────────────
+    # Block off-topic / injection queries before any LLM or router call.
+    is_blocked, rejection_msg = check_query_relevance(query, context="repo")
+    if is_blocked:
+        return {"reply": rejection_msg}
+    # ──────────────────────────────────────────────────────────────────────────
+
     db = get_db()
 
     # 1. First run the deterministic query router
@@ -224,6 +232,14 @@ async def repo_chat_stream(repo_id: str, query: str, history: list[dict]):
     History is saved after the stream completes.
     """
     from services.repo_chat_service import stream_chat_with_repo
+
+    # ── Layer-1 Guardrail ──────────────────────────────────────────────────────
+    # Block off-topic / injection queries before any LLM or router call.
+    is_blocked, rejection_msg = check_query_relevance(query, context="repo")
+    if is_blocked:
+        yield rejection_msg
+        return
+    # ──────────────────────────────────────────────────────────────────────────
 
     db = get_db()
 
