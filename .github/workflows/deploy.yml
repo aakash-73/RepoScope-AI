@@ -5,6 +5,10 @@ on:
     branches:
       - main
 
+concurrency:
+  group: deploy-production
+  cancel-in-progress: true
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -35,17 +39,49 @@ jobs:
       - name: Deploy
         run: |
           ssh ssh.arndevs.com << 'ENDSSH'
+            # ── Lock — prevent concurrent deploys ──────────────────────────
+            exec 9>/tmp/reposcope-deploy.lock
+            flock -w 300 9 || { echo "Deploy timed out waiting for lock."; exit 1; }
+
             cd ~/RepoScope-AI
             git pull origin main
+
+            # ── Backend — only pip install if requirements.txt changed ─────
             cd backend
             source .venv/bin/activate
-            pip install -r requirements.txt -q
+
+            REQ_HASH=$(md5sum requirements.txt | cut -d' ' -f1)
+            LAST_HASH=$(cat /tmp/reposcope_req_hash 2>/dev/null || echo "none")
+
+            if [ "$REQ_HASH" != "$LAST_HASH" ]; then
+                echo "requirements.txt changed — running pip install..."
+                pip install -r requirements.txt -q --upgrade-strategy only-if-needed
+                echo "$REQ_HASH" > /tmp/reposcope_req_hash
+            else
+                echo "requirements.txt unchanged — skipping pip install."
+            fi
+
+            # ── Frontend — only npm install if package.json changed ────────
             cd ../frontend
-            npm install
+
+            PKG_HASH=$(md5sum package.json | cut -d' ' -f1)
+            LAST_PKG_HASH=$(cat /tmp/reposcope_pkg_hash 2>/dev/null || echo "none")
+
+            if [ "$PKG_HASH" != "$LAST_PKG_HASH" ]; then
+                echo "package.json changed — running npm install..."
+                npm install --prefer-offline
+                echo "$PKG_HASH" > /tmp/reposcope_pkg_hash
+            else
+                echo "package.json unchanged — skipping npm install."
+            fi
+
             npm run build
+
+            # ── Restart services ───────────────────────────────────────────
             cd ..
             pm2 restart reposcope-backend
             pm2 restart reposcope-frontend
             pm2 save
+
             echo "Deployed successfully!"
           ENDSSH
