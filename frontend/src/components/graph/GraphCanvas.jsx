@@ -15,6 +15,7 @@ import FlowEdge from "./FlowEdge";
 import { applyDagreLayout } from "../../lib/graph-layout";
 import { applyForceLayout } from "../../lib/force-layout";
 import { getLanguageColor } from "../../lib/utils";
+import BrainIcon from "../ui/BrainIcon";
 
 const nodeTypes = { codeNode: CodeNode, folderGroup: FolderGroup, hubNode: CodeNode };
 const edgeTypes = { flowEdge: FlowEdge };
@@ -695,8 +696,8 @@ const GraphCanvas = forwardRef(function GraphCanvas(
     return (
       <div className="flex-1 flex items-center justify-center">
         <div className="text-center space-y-4 max-w-sm px-6">
-          <div className="w-16 h-16 rounded-2xl bg-blue-500/10 border border-blue-500/20 mx-auto flex items-center justify-center">
-            <span className="text-3xl">🧠</span>
+          <div className="w-16 h-16 rounded-2xl bg-moss/10 border border-moss/20 mx-auto flex items-center justify-center">
+            <BrainIcon className="w-12 h-12" />
           </div>
           <p className="text-slate-300 font-display text-sm font-semibold">
             Knowledge Graph not ready yet

@@ -1,7 +1,7 @@
 import asyncio
 from datetime import datetime
 from database import get_db
-from services.groq_service import call_groq
+from services.file_chat_service import call_groq
 
 STRUCTURED_PROMPT = """
 You are an expert software architect analysing a single file in a codebase.
@@ -158,7 +158,7 @@ async def _analyze_single_node(repo_id: str, file: dict, all_files: list):
             outgoing_count=len(outgoing)
         )
 
-        # Call LLM (Ollama via groq_service alias)
+        # Call LLM (Ollama via file_chat_service alias)
         response = await call_groq(prompt)
         analysis = _parse_json_response(response)
 

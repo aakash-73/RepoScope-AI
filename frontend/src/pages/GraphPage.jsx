@@ -16,6 +16,7 @@ import LanguageLegend from "../components/graph/LanguageLegend";
 import GraphSearch from "../components/graph/GraphSearch";
 import { fetchGraph, reanalyzeNode, listRepos, getClientId } from "../lib/api";
 import { useKeyboardShortcuts } from "../lib/useKeyboardShortcuts";
+import BrainIcon from "../components/ui/BrainIcon";
 
 // Build the SSE URL from the same base as the API
 const SSE_BASE = import.meta.env.VITE_API_URL || "";
@@ -577,7 +578,7 @@ export default function GraphPage() {
               >
                 <div className="flex justify-between items-center text-[10px] font-display font-bold uppercase tracking-[0.2em] text-moss">
                   <div className="flex items-center gap-2">
-                    <span className="text-sm">🧠</span>
+                    <BrainIcon className="w-6 h-6" />
                     AI Understanding
                   </div>
                   <span className="bg-moss/10 px-2 py-0.5 rounded-full border border-moss/20">

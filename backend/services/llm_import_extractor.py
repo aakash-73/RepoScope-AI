@@ -27,7 +27,7 @@ def is_safe_regex(pattern_str: str) -> bool:
 
 _log = logging.getLogger(__name__)
 
-# Use the same Ollama client as groq_service.py — no separate API key needed
+# Use the same Ollama client as file_chat_service.py — no separate API key needed
 _client = AsyncOpenAI(base_url=settings.OLLAMA_BASE_URL, api_key="ollama")
 
 # In-process cache: language → list of compiled regex patterns

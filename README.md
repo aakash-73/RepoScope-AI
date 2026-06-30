@@ -408,7 +408,7 @@ flowchart TD
     subgraph PromptDetail["Synthesis Prompt Structure"]
         direction TB
         P1["Frontend layer:\nGraphPage.jsx: Main page managing graph state\nCodeNode.jsx: Custom node renderer with badges\nLanguageLegend.jsx: Color legend component\n..."]
-        P2["Backend layer:\nmain.py: FastAPI entry point with lifespan\nrepo_controller.py: Import and graph pipeline\ngroq_service.py: LLM calls with retry logic\n..."]
+        P2["Backend layer:\nmain.py: FastAPI entry point with lifespan\nrepo_controller.py: Import and graph pipeline\nfile_chat_service.py: LLM calls with retry logic\n..."]
         P3["Database layer:\ndatabase.py: MongoDB connection helpers\nrepository.py: Pydantic schemas\n..."]
         P4["DevOps layer:\nconfig.py: Pydantic settings from env vars\nlogging.conf: Structured logging config\n..."]
         P5["Entry points:\nmain.py, App.jsx, main.jsx"]
@@ -546,7 +546,7 @@ reposcope-ai/
 │   │   ├── graph_builder.py           # Dependency graph + analytics computation
 │   │   ├── graph_service.py           # Graph data access helpers
 │   │   ├── node_analyzer_service.py   # Background per-node LLM analysis pipeline + KG Population
-│   │   ├── groq_service.py            # LLM service (explain, chat, retry logic)
+│   │   ├── file_chat_service.py            # LLM service (explain, chat, retry logic)
 │   │   ├── repo_chat_service.py       # Repo-level understanding + streaming chat
 │   │   ├── query_router_service.py    # Hive Network Router mapping queries to concepts
 │   │   ├── graph_aggregator_service.py# Aggregates graph data into semantic clusters

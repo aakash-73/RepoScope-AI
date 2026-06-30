@@ -115,8 +115,11 @@ Rules:
 - Use ALL the provided context — the high-level understanding AND the per-file analyses.
 - Prioritize facts from per-file analysis (purpose, architectural_role, key_patterns, functional_categories) over general summaries when answering specific questions.
 - When asked about the tech stack, frameworks, or libraries: scan the key_patterns and language fields across all analyzed files and produce an accurate, complete answer.
+- When asked about the tech stack, always include the project's PURPOSE in the same answer — never list technologies without explaining what the project does and why those technologies are used.
+- When describing technologies, use ONLY the names and roles as they appear in the context. Do NOT add general descriptions, definitions, or Wikipedia-style explanations of what a framework is — only state how it is used in THIS project.
 - Reference specific file paths when relevant (e.g. `services/github_service.py`).
-- If the answer truly cannot be found in the context, say so — do NOT fabricate.
+- **GROUND your answer STRICTLY in the provided context. Do NOT infer, guess, or extrapolate behavior or facts not explicitly present in the context.**
+- If the answer truly cannot be found in the context, say so clearly — do NOT fabricate or fill gaps with general programming knowledge.
 - Keep answers concise and developer-friendly. Use markdown.
 
 Strict Safety Instructions (HARD RULES — no exceptions):
@@ -161,7 +164,7 @@ async def build_repo_understanding(
                 },
             ],
             temperature=0.2,
-            max_tokens=1500,
+            max_tokens=1000,
         )
         return _strip_thinking(response.choices[0].message.content or "Analysis unavailable.")
 
@@ -289,7 +292,7 @@ async def stream_chat_with_repo(
                 *history,
                 {"role": "user", "content": user_query},
             ],
-            temperature=0.3,
+            temperature=0.2,
             max_tokens=1000,
             stream=True,
         )

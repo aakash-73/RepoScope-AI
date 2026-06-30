@@ -15,7 +15,7 @@ from services.github_service import download_and_extract, _parse_github_url, get
 from services.graph_builder import build_dependency_graph
 from services.analyzer_service import analyze_file
 from services.smart_classifier import classify_file_async
-from services.groq_service import explain_component, chat_with_component
+from services.file_chat_service import explain_component, chat_with_component
 from controllers.repo_chat_controller import invalidate_repo_cache
 from models.repository import ComponentChatRequest
 from services.node_analyzer_service import analyze_all_nodes, _analyze_single_node

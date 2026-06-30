@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from database import get_db
-from services.groq_service import explain_component
+from services.file_chat_service import explain_component
 from services.analyzer_service import analyze_file
 
 logger = logging.getLogger(__name__)

@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { listRepos, deleteRepo, retryRepoImport, syncRepo, updateSyncSettings } from "../../lib/api";
 import { formatDate } from "../../lib/utils";
+import BrainIcon from "../ui/BrainIcon";
 
 // ── Status badge ──────────────────────────────────────────────────────────────
 function StatusBadge({ status, analysisStatus }) {
@@ -22,7 +23,7 @@ function StatusBadge({ status, analysisStatus }) {
     if (analysisStatus === "analyzing") {
       return (
         <span className="flex items-center gap-1 text-[9px] text-moss/70 font-display animate-pulse italic">
-          <span className="text-[10px]">🧠</span>
+          <BrainIcon className="w-4 h-4" />
           thinking…
         </span>
       );

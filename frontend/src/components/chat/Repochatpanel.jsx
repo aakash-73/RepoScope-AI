@@ -43,7 +43,7 @@ const mdComponents = {
         const match = /language-(\w+)/.exec(className || '');
         const text = String(children);
         const isBlock = match || text.includes('\n');
-        
+
         if (!isBlock) {
             return (
                 <code className="bg-moss/15 text-moss px-1 py-0.5 rounded text-xs font-mono" {...props}>
@@ -381,7 +381,7 @@ export default function RepoChatPanel({ open, onClose, repoId, repoName }) {
                             </button>
                         </div>
                         <p className="text-[10px] text-slate-700 mt-1.5 px-1">
-                            Powered by Llama 3.1 8B · Enter to send
+                            Powered by Qwen2.5-coder:7b-instruct · Enter to send
                         </p>
                     </div>
                 </motion.div>
